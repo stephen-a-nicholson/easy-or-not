@@ -4,11 +4,11 @@
 
 `easy-or-not` reads a runner's own activities (exported FIT files, or the Garmin Personal API via Garmin's official `garmin-connect-personal-api-python` client) and reports time in easy, middle and hard heart-rate bands, how much "easy" running drifted into the middle, and metres per heartbeat on outdoor easy runs over time. Everything runs locally.
 
-Code: `src/easy_or_not/` (`fit.py` parsing, `zones.py` bands, `analysis.py` metrics, `report.py` output, `garmin.py` API fetch, `cli.py`). Tests build FIT files in memory with `fit-tool`.
+Code: `src/easy_or_not/` (`fit.py` parsing, `zones.py` bands, `checks.py` data sanity checks, `analysis.py` metrics, `load.py` training load, `report.py` output, `garmin.py` API fetch, `setup.py` key setup, `cli.py`). Tests build FIT files in memory with `fit-tool`.
 
 ## Current state (22 Oct 2026)
 
-- Pushed to GitHub, CI green. Not yet on PyPI; publishing is `.github/workflows/publish.yml` with trusted publishing, run by hand once the output is trustworthy.
+- Pushed to GitHub, CI green. Published to PyPI as 0.1.0 on 22 Oct 2026 via `.github/workflows/publish.yml` (trusted publishing, GitHub environment `pypi`, run by hand with `gh workflow run publish.yml`). A version can only be uploaded once, so bump `version` in `pyproject.toml` and `__version__` in `src/easy_or_not/__init__.py` before the next publish.
 - First run against the owner's real account worked end to end: 37 runs, API shapes for activity type and zones matched.
 - **Diagnosed (22 Oct 2026):** the HR data is genuine, not locked to cadence (HR follows pace and warm-up; cadence stays flat; HR often sits 10 to 15 bpm away from steps per minute). The owner really does run most runs at 175 to 185 bpm. Garmin's zones look too low: a 46 minute effort at a median of 185 bpm is not plausible above 96% of max, so the real max is likely around 200 or more. Even with max 205, 69% of time is in the middle band.
 - The earlier "easy runs" were artefacts: fragments under 10 minutes, walks logged as runs, and a watch left recording for an hour after a run.
@@ -17,9 +17,9 @@ Code: `src/easy_or_not/` (`fit.py` parsing, `zones.py` bands, `analysis.py` metr
 
 ## Next work
 
-1. Publish to PyPI (run `publish.yml` by hand) so `uv tool install easy-or-not` works; until then install instructions in the README fail.
-2. Optional max HR estimate from sustained efforts, clearly labelled as an estimate. Load depends on zones too, so this matters more now.
-3. Possibly a recovery or readiness view from the Personal API's daily HRV, sleep and resting HR (shapes unverified).
+1. Optional max HR estimate from sustained efforts, clearly labelled as an estimate. Load depends on zones too, so this matters more now.
+2. Possibly a recovery or readiness view from the Personal API's daily HRV, sleep and resting HR (shapes unverified).
+3. Tidy CI: actions on Node.js 20 are deprecated, and setup-uv's cache finds no lock file (`uv.lock` is not committed).
 
 ## Rules
 
