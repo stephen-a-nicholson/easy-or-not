@@ -21,11 +21,15 @@ from garmin_personal_api import (
 
 from easy_or_not.fit import NotARun, load_bytes
 from easy_or_not.models import Run
+from easy_or_not.wellness import Day, parse
 from easy_or_not.zones import Zones, from_garmin
 
-__all__ = ["GarminPersonalApiError", "fetch"]
+__all__ = ["GarminPersonalApiError", "fetch", "fetch_wellness"]
 
 PAGE_SIZE = 50
+
+# The sleep summaries endpoint returns HTTP 400 for ranges much over a month.
+SLEEP_CHUNK_DAYS = 28
 
 
 def _is_run(activity: dict[str, Any]) -> bool:
@@ -79,3 +83,45 @@ def fetch(days: int, cache_dir: Path, quiet: bool = False) -> tuple[list[Run], Z
                 continue
 
     return runs, zones
+
+
+def fetch_wellness(days: int, quiet: bool = False) -> dict[date, Day]:
+    """Overnight HRV, sleep and resting HR for the last `days` days, keyed by date.
+
+    Each source is fetched separately, so one failing endpoint loses only its
+    own signal (and says so) while the readiness view shows the rest.
+    """
+    end = date.today()
+    start = end - timedelta(days=days - 1)
+
+    with PersonalApiAuthenticator() as auth:
+        token = auth.obtain_token(resolve_api_key())
+
+    with GarminPersonalApiClient(token.access_token) as client:
+
+        def get(name: str, call: Any) -> Any:
+            try:
+                return call()
+            except GarminPersonalApiError as e:
+                if not quiet:
+                    print(f"  could not read {name} from Garmin: {e}", file=sys.stderr)
+                return None
+
+        hrv = get("HRV", lambda: client.get_daily_hrv_summaries(start, end))
+        sleep: list[Any] = []
+        for first, last in _chunks(start, end, SLEEP_CHUNK_DAYS):
+            part = get("sleep", lambda f=first, la=last: client.get_daily_sleep_summaries(f, la))
+            if isinstance(part, list):
+                sleep.extend(part)
+        summaries = get("resting heart rate", lambda: client.get_daily_summaries(start, end))
+    return parse(hrv, sleep, summaries)
+
+
+def _chunks(start: date, end: date, size: int) -> list[tuple[date, date]]:
+    """Split an inclusive date range into inclusive pieces of at most `size` days."""
+    pieces = []
+    while start <= end:
+        last = min(end, start + timedelta(days=size - 1))
+        pieces.append((start, last))
+        start = last + timedelta(days=1)
+    return pieces

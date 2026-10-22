@@ -90,3 +90,17 @@ def zipped(data: bytes, name: str = "123_ACTIVITY.fit") -> bytes:
 @pytest.fixture
 def zones() -> Zones:
     return ZONES
+
+
+class _NoNetwork:
+    def __init__(self, *a, **k) -> None:
+        raise AssertionError("a test tried to reach Garmin; fake the client instead")
+
+
+@pytest.fixture(autouse=True)
+def no_garmin_network(monkeypatch) -> None:
+    """Tests never use the real key or API. Tests that need the client patch over this."""
+    from easy_or_not import garmin
+
+    monkeypatch.setattr(garmin, "PersonalApiAuthenticator", _NoNetwork)
+    monkeypatch.setattr(garmin, "GarminPersonalApiClient", _NoNetwork)

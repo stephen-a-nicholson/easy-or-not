@@ -2,9 +2,9 @@
 
 Are your easy runs actually easy?
 
-Most runners who stop improving are not lazy. They run almost everything at the same medium effort, too hard to recover from and too easy to make them faster. This tool reads your own runs and tells you how much of your time went where, how much of your "easy" running drifted into the middle, whether you are getting faster at the same heart rate, and your training load from week to week.
+Most runners who stop improving are not lazy. They run almost everything at the same medium effort, too hard to recover from and too easy to make them faster. This tool reads your own runs and tells you how much of your time went where, how much of your "easy" running drifted into the middle, whether you are getting faster at the same heart rate, your training load from week to week, and how ready you are to train today.
 
-It was built for watches like the Vivoactive 5, which record every heartbeat but leave Training Load to Garmin's more expensive models.
+It was built for watches like the Vivoactive 5, which record every heartbeat, overnight HRV and sleep, but leave Training Load and Training Readiness to Garmin's more expensive models.
 
 It works on FIT files you have exported, or straight from your account with a [Garmin Personal API](https://developer.garmin.com/gc-developer-program/personal/personal-api/) key. Everything runs on your machine. Your data and your key never leave it.
 
@@ -51,6 +51,7 @@ uv tool install easy-or-not
 easy-or-not setup    # once: paste your Personal API key
 easy-or-not          # your last 8 weeks of runs
 easy-or-not garmin --days 90
+easy-or-not readiness   # today's readiness and the last 7 nights
 ```
 
 `setup` tells you where to create the key in Garmin Connect ([Settings, Personal API Token](https://connect.garmin.com/app/settings/personalApiToken)), reads it without showing it on screen, saves it to `~/.config/garmin/connect-personal-api-key` readable only by you, and checks it with Garmin.
@@ -80,6 +81,17 @@ Without the API there are no Garmin zones to read, so pass your max heart rate.
 **Zones that look too low.** If you held a median heart rate in zone 5 for half an hour or more, the report says your zones are probably set too low rather than telling you that you ran half an hour flat out.
 
 **Training load.** Each run's load is its Edwards TRIMP: minutes in each heart-rate zone multiplied by the zone number, so a minute in zone 5 counts five times a minute in zone 1. The report compares the last 7 days with your average week over the last 4 (it needs 4 weeks of runs). Below 0.8 is lighter than usual, 0.8 to 1.3 is in line, 1.3 to 1.5 is a step up, above 1.5 is a big jump. Runs under 10 minutes still count towards load; walks do not. From your Garmin account, load is measured up to today, so a week off shows as a week off. It is a heart-rate estimate, not Garmin's Training Load, and it is only as right as your zones.
+
+**Readiness.** With your Garmin account, the report ends with a readiness check for today, and `easy-or-not readiness` shows it with the last 7 nights. It rates four signals against your own normal:
+
+| Signal | Off | Well off |
+|---|---|---|
+| Overnight HRV | above Garmin's balanced range for you | below it |
+| Resting HR | 3 to 4 bpm above your 4-week median | 5 or more above |
+| Sleep | | Garmin sleep score under 60, or under 6 hours with no score |
+| Training load | ratio 1.3 to 1.5 | above 1.5 |
+
+Nothing off means good to train, a little off means go easy, more than that means rest or keep it very easy. A night with no data (watch off or charging) is shown as missing, not counted against you. This is a transparent estimate built from the same kinds of data, not Garmin's Training Readiness score, whose weightings are not public.
 
 **Pauses.** Gaps of more than 10 seconds between samples (traffic lights, a stopped watch) are not counted.
 

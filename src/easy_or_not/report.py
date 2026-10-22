@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import textwrap
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import date, timedelta
 
 from easy_or_not import load
 from easy_or_not.analysis import Report
+from easy_or_not.readiness import LOW, OK, WATCH, Readiness
+from easy_or_not.wellness import Day
 
 BAR_WIDTH = 30
 BANDS = ("easy", "middle", "hard")
@@ -19,6 +22,8 @@ BOLD = "1"
 DIM = "2"
 COLOURS = {"easy": "32", "middle": "33", "hard": "31", "load": "36", "warning": "1;33"}
 VERDICT_COLOURS = {"in line": "32", "a step up": "33", "a big jump": "31"}
+RATING_COLOURS = {OK: "32", WATCH: "33", LOW: "31"}
+READINESS_COLOURS = {"good": "1;32", "go easy": "1;33", "rest": "1;31"}
 
 
 @dataclass(frozen=True)
@@ -43,7 +48,9 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
-def render_text(report: Report, style: Style | None = None) -> str:
+def render_text(
+    report: Report, style: Style | None = None, readiness: Readiness | None = None
+) -> str:
     st = style or Style()
     z = report.zones
     heading = lambda text: st.paint(text, BOLD)  # noqa: E731
@@ -107,6 +114,9 @@ def render_text(report: Report, style: Style | None = None) -> str:
         lines.append(note("  Treadmill runs are left out: wrist pace indoors is an estimate."))
     lines.append("")
     lines += _load_lines(report, st)
+    if readiness is not None:
+        lines.append("")
+        lines += _readiness_lines(readiness, st)
     return "\n".join(lines)
 
 
@@ -137,9 +147,10 @@ def _load_lines(report: Report, st: Style) -> list[str]:
     return lines
 
 
-def render_json(report: Report) -> str:
+def render_json(report: Report, readiness: Readiness | None = None) -> str:
     return json.dumps(
         {
+            "readiness": _readiness_summary(readiness) if readiness else None,
             "zones": vars(report.zones),
             "totals": {b: report.total_fraction(b) for b in ("easy", "middle", "hard")},
             "easy_run_middle_fraction": report.easy_run_middle_fraction(),
@@ -181,4 +192,58 @@ def _load_json(report: Report) -> dict | None:
         "average_week_last_28_days": current.chronic,
         "ratio": current.ratio,
         "weekly": [{"week": m.isoformat(), "load": w} for m, w in load.weekly(report)],
+    }
+
+
+def _readiness_lines(readiness: Readiness, st: Style) -> list[str]:
+    verdict = readiness.verdict
+    code = next((c for k, c in READINESS_COLOURS.items() if verdict.startswith(k)), BOLD)
+    lines = [st.paint(f"Readiness for {readiness.day:%a %d %b}: ", BOLD) + st.paint(verdict, code)]
+    for signal in readiness.signals:
+        mark = st.paint(f"{signal.rating or '-':<6}", RATING_COLOURS.get(signal.rating or "", DIM))
+        lines.append(f"  {signal.name:<12}{signal.value:<12}{mark} {signal.detail}")
+    lines.append(
+        st.paint("  Your own estimate from Garmin's data, not Garmin's Training Readiness.", DIM)
+    )
+    return lines
+
+
+def render_readiness(
+    readiness: Readiness, days: dict[date, Day], style: Style | None = None
+) -> str:
+    st = style or Style()
+    lines = _readiness_lines(readiness, st)
+    lines += ["", st.paint("Last 7 nights", BOLD)]
+    lines.append(st.paint("  day         HRV   range   resting HR  sleep  score", DIM))
+    for offset in range(6, -1, -1):
+        d = days.get(readiness.day - timedelta(days=offset))
+        when = readiness.day - timedelta(days=offset)
+        if d is None:
+            lines.append(f"  {when:%a %d %b}  " + st.paint("no data", DIM))
+            continue
+        span = f"{d.hrv_low}-{d.hrv_high}" if d.hrv_low and d.hrv_high else "-"
+        sleep = f"{d.sleep_s / 3600:.1f}" if d.sleep_s else "-"
+        lines.append(
+            f"  {when:%a %d %b}  {_dash(d.hrv):>4}  {span:>6}  {_dash(d.resting_hr):>10}"
+            f"  {sleep:>5}  {_dash(d.sleep_score):>5}"
+        )
+    return "\n".join(lines)
+
+
+def _dash(value: int | None) -> str:
+    return "-" if value is None else str(value)
+
+
+def _readiness_summary(readiness: Readiness) -> dict:
+    return {
+        "day": readiness.day.isoformat(),
+        "verdict": readiness.verdict,
+        "signals": [asdict(s) for s in readiness.signals],
+    }
+
+
+def readiness_json(readiness: Readiness, days: dict[date, Day]) -> dict:
+    return {
+        **_readiness_summary(readiness),
+        "days": [{**asdict(d), "day": d.day.isoformat()} for _, d in sorted(days.items())],
     }
