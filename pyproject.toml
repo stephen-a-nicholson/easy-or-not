@@ -36,6 +36,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "README.md", "LICENSE", "pyproject.toml"]
+exclude = ["CLAUDE.md"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/easy_or_not"]
