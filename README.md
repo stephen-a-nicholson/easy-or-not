@@ -2,7 +2,9 @@
 
 Are your easy runs actually easy?
 
-Most runners who stop improving are not lazy. They run almost everything at the same medium effort, too hard to recover from and too easy to make them faster. This tool reads your own runs and tells you how much of your time went where, how much of your "easy" running drifted into the middle, and whether you are getting faster at the same heart rate.
+Most runners who stop improving are not lazy. They run almost everything at the same medium effort, too hard to recover from and too easy to make them faster. This tool reads your own runs and tells you how much of your time went where, how much of your "easy" running drifted into the middle, whether you are getting faster at the same heart rate, and your training load from week to week.
+
+It was built for watches like the Vivoactive 5, which record every heartbeat but leave Training Load to Garmin's more expensive models.
 
 It works on FIT files you have exported, or straight from your account with a [Garmin Personal API](https://developer.garmin.com/gc-developer-program/personal/personal-api/) key. Everything runs on your machine. Your data and your key never leave it.
 
@@ -25,6 +27,11 @@ Your easy runs (18 of 30, sessions excluded)
 Same heart rate, faster? (outdoor easy runs only)
   1.40 -> 1.43 metres per heartbeat (+2.5%).
   Higher means you cover more ground for the same effort.
+
+Training load (heart-rate minutes, weighted 1 to 5 by zone)
+  Last 7 days to Thu 22 Oct: 412
+  Your average week over the last 4: 380
+  Ratio 1.08: in line with your recent weeks.
 ```
 
 *(Example output from synthetic data.)*
@@ -71,6 +78,8 @@ Without the API there are no Garmin zones to read, so pass your max heart rate.
 **What gets left out.** Activities with under 10 minutes of heart-rate data (a GPS test, a watch started by accident), and walks logged as runs (median cadence under 140 steps per minute). A walk home or a watch left recording after the run is trimmed off the end, so it does not count as easy running. The report says how many were left out and why.
 
 **Zones that look too low.** If you held a median heart rate in zone 5 for half an hour or more, the report says your zones are probably set too low rather than telling you that you ran half an hour flat out.
+
+**Training load.** Each run's load is its Edwards TRIMP: minutes in each heart-rate zone multiplied by the zone number, so a minute in zone 5 counts five times a minute in zone 1. The report compares the last 7 days with your average week over the last 4 (it needs 4 weeks of runs). Below 0.8 is lighter than usual, 0.8 to 1.3 is in line, 1.3 to 1.5 is a step up, above 1.5 is a big jump. Runs under 10 minutes still count towards load; walks do not. From your Garmin account, load is measured up to today, so a week off shows as a week off. It is a heart-rate estimate, not Garmin's Training Load, and it is only as right as your zones.
 
 **Pauses.** Gaps of more than 10 seconds between samples (traffic lights, a stopped watch) are not counted.
 

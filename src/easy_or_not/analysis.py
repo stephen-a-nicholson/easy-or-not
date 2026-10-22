@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from statistics import median
 
-from easy_or_not.checks import IMPLAUSIBLE_Z5_S, skip_reason, trim_tail
+from easy_or_not.checks import IMPLAUSIBLE_Z5_S, SHORT_REASON, skip_reason, trim_tail
 from easy_or_not.models import Run
 from easy_or_not.zones import Zones
 
@@ -34,6 +34,12 @@ class RunSummary:
     run: Run
     seconds: dict[str, float]  # band -> seconds
     efficiency: float | None  # metres per heartbeat while in the easy band
+    zone_seconds: dict[int, float] = field(default_factory=dict)  # zone 1-5 -> seconds
+
+    @property
+    def load(self) -> float:
+        """Edwards TRIMP: minutes in each heart-rate zone times the zone number."""
+        return sum(zone * s / 60.0 for zone, s in self.zone_seconds.items())
 
     @property
     def total_s(self) -> float:
@@ -53,6 +59,9 @@ class Report:
     runs: list[RunSummary]
     skipped: list[tuple[Run, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Runs too short for the time-in-zone figures still count towards load.
+    load_only: list[RunSummary] = field(default_factory=list)
+    as_of: date | None = None
 
     def total_fraction(self, band: str) -> float:
         total = sum(r.total_s for r in self.runs)
@@ -90,6 +99,7 @@ class Report:
 
 def summarise(run: Run, zones: Zones) -> RunSummary:
     seconds: dict[str, float] = defaultdict(float)
+    zone_seconds: dict[int, float] = defaultdict(float)
     metres = 0.0
     beats = 0.0
     samples = run.samples
@@ -99,11 +109,14 @@ def summarise(run: Run, zones: Zones) -> RunSummary:
             continue
         band = zones.band(prev.heart_rate)
         seconds[band] += dt
+        zone_seconds[zones.zone(prev.heart_rate)] += dt
         if band == "easy" and prev.elapsed_s >= WARMUP_S and prev.speed_mps:
             metres += prev.speed_mps * dt
             beats += prev.heart_rate * dt / 60.0
     efficiency = metres / beats if beats > 60 else None
-    return RunSummary(run=run, seconds=dict(seconds), efficiency=efficiency)
+    return RunSummary(
+        run=run, seconds=dict(seconds), efficiency=efficiency, zone_seconds=dict(zone_seconds)
+    )
 
 
 def median_hr(run: Run) -> float | None:
@@ -129,14 +142,27 @@ def zone_warnings(runs: list[RunSummary], zones: Zones) -> list[str]:
     ]
 
 
-def analyse(runs: list[Run], zones: Zones) -> Report:
+def analyse(runs: list[Run], zones: Zones, as_of: date | None = None) -> Report:
+    """Summarise runs. `as_of` is the day load is measured to (default: the last run)."""
     kept: list[RunSummary] = []
+    load_only: list[RunSummary] = []
     skipped: list[tuple[Run, str]] = []
     for run in sorted(runs, key=lambda r: r.start):
         summary = summarise(trim_tail(run), zones)
         reason = skip_reason(run, summary.total_s)
         if reason:
             skipped.append((run, reason))
+            if reason == SHORT_REASON:
+                load_only.append(summary)
         else:
             kept.append(summary)
-    return Report(zones=zones, runs=kept, skipped=skipped, warnings=zone_warnings(kept, zones))
+    if as_of is None and runs:
+        as_of = max(r.start for r in runs).date()
+    return Report(
+        zones=zones,
+        runs=kept,
+        skipped=skipped,
+        warnings=zone_warnings(kept, zones),
+        load_only=load_only,
+        as_of=as_of,
+    )

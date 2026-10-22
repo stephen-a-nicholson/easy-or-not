@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 from easy_or_not import __version__
@@ -84,7 +85,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     zones = replace(zones, easy_up_to=args.easy_up_to)
-    report = analyse(runs, zones)
+    # From the API, load is measured to today, so a week off shows as a week off.
+    as_of = date.today() if args.source == "garmin" else None
+    report = analyse(runs, zones, as_of=as_of)
     print(render_json(report) if args.json else render_text(report))
     return 0
 

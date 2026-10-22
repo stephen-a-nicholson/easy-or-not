@@ -6,6 +6,7 @@ import json
 import textwrap
 from collections import Counter
 
+from easy_or_not import load
 from easy_or_not.analysis import Report
 
 BAR_WIDTH = 30
@@ -72,7 +73,29 @@ def render_text(report: Report) -> str:
         )
     if any(r.run.treadmill for r in report.runs):
         lines.append("  Treadmill runs are left out: wrist pace indoors is an estimate.")
+    lines.append("")
+    lines += _load_lines(report)
     return "\n".join(lines)
+
+
+def _load_lines(report: Report) -> list[str]:
+    lines = ["Training load (heart-rate minutes, weighted 1 to 5 by zone)"]
+    current = load.status(report)
+    if current is None:
+        return [*lines, "  No heart-rate data."]
+    lines.append(f"  Last 7 days to {current.as_of:%a %d %b}: {current.acute:.0f}")
+    if current.chronic is None:
+        lines.append("  Needs 4 weeks of runs to compare with your usual week.")
+    else:
+        lines.append(f"  Your average week over the last 4: {current.chronic:.0f}")
+        lines.append(f"  Ratio {current.ratio:.2f}: {current.verdict}.")
+    weeks = load.weekly(report)[-8:]
+    top = max((w for _, w in weeks), default=0.0)
+    if top > 0:
+        lines.append("  Week of")
+        for monday, week_load in weeks:
+            lines.append(f"    {monday:%d %b}  {week_load:5.0f}  {_bar(week_load / top)}")
+    return lines
 
 
 def render_json(report: Report) -> str:
@@ -87,6 +110,7 @@ def render_json(report: Report) -> str:
                 {"id": run.run_id, "start": run.start.isoformat(), "reason": reason}
                 for run, reason in report.skipped
             ],
+            "load": _load_json(report),
             "weekly": [
                 {"week": week.isoformat(), "seconds": seconds} for week, seconds in report.weekly()
             ],
@@ -98,9 +122,24 @@ def render_json(report: Report) -> str:
                     "session": r.is_session,
                     "seconds": r.seconds,
                     "efficiency": r.efficiency,
+                    "load": r.load,
                 }
                 for r in report.runs
             ],
         },
         indent=2,
     )
+
+
+def _load_json(report: Report) -> dict | None:
+    current = load.status(report)
+    if current is None:
+        return None
+    return {
+        "method": "Edwards TRIMP",
+        "as_of": current.as_of.isoformat(),
+        "last_7_days": current.acute,
+        "average_week_last_28_days": current.chronic,
+        "ratio": current.ratio,
+        "weekly": [{"week": m.isoformat(), "load": w} for m, w in load.weekly(report)],
+    }
