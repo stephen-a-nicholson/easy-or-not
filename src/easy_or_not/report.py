@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import textwrap
+from collections import Counter
 
 from easy_or_not.analysis import Report
 
@@ -25,8 +27,16 @@ def render_text(report: Report) -> str:
         f"  easy below {z.easy_ceiling} bpm   middle {z.easy_ceiling}-{z.hard_floor - 1} bpm"
         f"   hard {z.hard_floor}+ bpm",
         "",
-        "Where your running time went",
     ]
+    if report.skipped:
+        lines.append(f"  {len(report.skipped)} more left out:")
+        reasons = Counter(reason for _, reason in report.skipped)
+        for reason, count in reasons.items():
+            lines.append(f"    {count} with {reason}")
+    for warning in report.warnings:
+        lines.append("")
+        lines += textwrap.wrap(warning, width=78, initial_indent="! ", subsequent_indent="  ")
+    lines += ["", "Where your running time went"]
     for band in ("easy", "middle", "hard"):
         f = report.total_fraction(band)
         lines.append(f"  {band:<7}{_pct(f)}  {_bar(f)}")
@@ -72,6 +82,11 @@ def render_json(report: Report) -> str:
             "totals": {b: report.total_fraction(b) for b in ("easy", "middle", "hard")},
             "easy_run_middle_fraction": report.easy_run_middle_fraction(),
             "efficiency_trend": report.efficiency_trend(),
+            "warnings": report.warnings,
+            "skipped": [
+                {"id": run.run_id, "start": run.start.isoformat(), "reason": reason}
+                for run, reason in report.skipped
+            ],
             "weekly": [
                 {"week": week.isoformat(), "seconds": seconds} for week, seconds in report.weekly()
             ],

@@ -12,11 +12,18 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from garmin_personal_api import GarminPersonalApiClient, PersonalApiAuthenticator, resolve_api_key
+from garmin_personal_api import (
+    GarminPersonalApiClient,
+    GarminPersonalApiError,
+    PersonalApiAuthenticator,
+    resolve_api_key,
+)
 
 from easy_or_not.fit import NotARun, load_bytes
 from easy_or_not.models import Run
 from easy_or_not.zones import Zones, from_garmin
+
+__all__ = ["GarminPersonalApiError", "fetch"]
 
 PAGE_SIZE = 50
 

@@ -85,6 +85,7 @@ def parse_fit(data: bytes, run_id: str) -> Run:
                         elapsed_s=(ts - first_ts).total_seconds(),
                         heart_rate=_get(frame, "heart_rate"),
                         speed_mps=float(speed) if speed is not None else None,
+                        cadence_spm=_steps_per_minute(frame),
                     )
                 )
 
@@ -100,6 +101,14 @@ def parse_fit(data: bytes, run_id: str) -> Run:
         samples=samples,
         treadmill=sub_sport in INDOOR_SUB_SPORTS,
     )
+
+
+def _steps_per_minute(frame: fitdecode.FitDataMessage) -> float | None:
+    # Running cadence in FIT is strides per minute (one foot), so double it.
+    cadence = _get(frame, "cadence")
+    if cadence is None:
+        return None
+    return (float(cadence) + float(_get(frame, "fractional_cadence") or 0.0)) * 2
 
 
 def _get(frame: fitdecode.FitDataMessage, name: str):  # noqa: ANN202 - FIT values are loosely typed

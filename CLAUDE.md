@@ -10,15 +10,15 @@ Code: `src/easy_or_not/` (`fit.py` parsing, `zones.py` bands, `analysis.py` metr
 
 - Pushed to GitHub, CI green. Not yet on PyPI; publishing is `.github/workflows/publish.yml` with trusted publishing, run by hand once the output is trustworthy.
 - First run against the owner's real account worked end to end: 37 runs, API shapes for activity type and zones matched.
-- **Open problem:** the numbers are implausible. On Garmin default zones (z3 134, z4 154, z5 173, implying max HR about 192) 77% of running time is "hard" and 52% is above z5, yet the owner's easy runs at 5:00/km feel very easy. Only 3 to 8 runs classify as easy, some of them one-minute activities.
-- Suspected causes, in order: wrist HR locking onto cadence (median HR close to steps per minute), or a max HR in Garmin settings that is too low. Check by printing per run median and max HR, median cadence x 2, pace and sub_sport from the cached files in `~/.cache/easy-or-not`.
+- **Diagnosed (22 Oct 2026):** the HR data is genuine, not locked to cadence (HR follows pace and warm-up; cadence stays flat; HR often sits 10 to 15 bpm away from steps per minute). The owner really does run most runs at 175 to 185 bpm. Garmin's zones look too low: a 46 minute effort at a median of 185 bpm is not plausible above 96% of max, so the real max is likely around 200 or more. Even with max 205, 69% of time is in the middle band.
+- The earlier "easy runs" were artefacts: fragments under 10 minutes, walks logged as runs, and a watch left recording for an hour after a run.
+- Added: `easy-or-not setup` (saves the key, checks it), bare `easy-or-not` runs the Garmin report, data checks in `checks.py` (trim trailing non-running, skip short and walking activities, warn when zone 5 is held for 30+ minutes).
 
 ## Next work
 
-1. Diagnose the cause above from the cached FIT files before changing any thresholds.
-2. Add data sanity checks that warn instead of printing a confident number: HR tracking cadence, implausibly high share of time near max, very short activities (ignore runs under about 10 minutes of HR data in the easy-run list).
-3. Consider deriving max HR from the data (high percentile across recent hard efforts) as an option, clearly labelled as an estimate.
-4. Then a training-load metric from HR (for watches like the Vivoactive 5 that lack Training Load).
+1. Publish to PyPI (run `publish.yml` by hand) so `uv tool install easy-or-not` works; until then install instructions in the README fail.
+2. Optional max HR estimate from sustained efforts, clearly labelled as an estimate.
+3. A training-load metric from HR (for watches like the Vivoactive 5 that lack Training Load).
 
 ## Rules
 

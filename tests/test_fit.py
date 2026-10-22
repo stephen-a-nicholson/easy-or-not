@@ -37,3 +37,13 @@ def test_directory_skips_non_runs(tmp_path) -> None:
     (tmp_path / "ride.fit").write_bytes(fit_bytes(sport=Sport.CYCLING))
     (tmp_path / "notes.txt").write_text("ignore me")
     assert len(load_path(tmp_path)) == 1
+
+
+def test_cadence_is_read_as_steps_per_minute() -> None:
+    run = parse_fit(fit_bytes(minutes=1, cadence=85), run_id="c")
+    assert run.samples[0].cadence_spm == 170
+
+
+def test_cadence_missing_is_none() -> None:
+    run = parse_fit(fit_bytes(minutes=1), run_id="n")
+    assert run.samples[0].cadence_spm is None

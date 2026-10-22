@@ -29,12 +29,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="highest heart-rate zone that counts as easy (default 2; try 3 on Garmin defaults)",
     )
     p.add_argument("--json", action="store_true", help="print JSON instead of text")
-    sub = p.add_subparsers(dest="source", required=True)
+    p.set_defaults(days=56, cache_dir=DEFAULT_CACHE)  # for a bare `easy-or-not`
+    sub = p.add_subparsers(dest="source", metavar="{garmin,files,setup}")
+
+    sub.add_parser("setup", help="save your Garmin Personal API key (run this once)")
 
     files = sub.add_parser("files", help="analyse .fit or .zip files you have exported")
     files.add_argument("paths", nargs="+", type=Path)
 
-    garmin = sub.add_parser("garmin", help="fetch your runs with a Garmin Personal API key")
+    garmin = sub.add_parser(
+        "garmin", help="fetch your runs with a Garmin Personal API key (the default)"
+    )
     garmin.add_argument("--days", type=int, default=56, help="how far back to look (default 56)")
     garmin.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE)
     return p
@@ -42,9 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    args.source = args.source or "garmin"
     zones: Zones | None = None
     runs: list[Run] = []
 
+    if args.source == "setup":
+        from easy_or_not.setup import setup
+
+        return setup()
     if args.source == "files":
         for path in args.paths:
             try:
@@ -52,9 +62,14 @@ def main(argv: list[str] | None = None) -> int:
             except NotARun as e:
                 print(f"skipping {e}", file=sys.stderr)
     else:
-        from easy_or_not.garmin import fetch  # imported here so `files` works offline
+        from easy_or_not.garmin import GarminPersonalApiError, fetch  # so `files` works offline
 
-        runs, zones = fetch(args.days, args.cache_dir, quiet=args.json)
+        try:
+            runs, zones = fetch(args.days, args.cache_dir, quiet=args.json)
+        except GarminPersonalApiError as e:
+            print(f"Could not reach your Garmin account: {e}", file=sys.stderr)
+            print("If you have not saved a key yet, run: easy-or-not setup", file=sys.stderr)
+            return 2
 
     if args.max_hr:
         zones = from_max_hr(args.max_hr)

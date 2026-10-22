@@ -8,10 +8,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from statistics import median
 
+from easy_or_not.checks import IMPLAUSIBLE_Z5_S, skip_reason, trim_tail
 from easy_or_not.models import Run
 from easy_or_not.zones import Zones
 
@@ -50,6 +51,8 @@ class RunSummary:
 class Report:
     zones: Zones
     runs: list[RunSummary]
+    skipped: list[tuple[Run, str]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def total_fraction(self, band: str) -> float:
         total = sum(r.total_s for r in self.runs)
@@ -103,6 +106,37 @@ def summarise(run: Run, zones: Zones) -> RunSummary:
     return RunSummary(run=run, seconds=dict(seconds), efficiency=efficiency)
 
 
+def median_hr(run: Run) -> float | None:
+    rates = [s.heart_rate for s in run.samples if s.heart_rate]
+    return median(rates) if rates else None
+
+
+def zone_warnings(runs: list[RunSummary], zones: Zones) -> list[str]:
+    """Flag zones that the data says are too low."""
+    suspicious = [
+        (r, hr)
+        for r in runs
+        if r.total_s >= IMPLAUSIBLE_Z5_S and (hr := median_hr(r.run)) and hr >= zones.z5
+    ]
+    if not suspicious:
+        return []
+    r, hr = max(suspicious, key=lambda pair: pair[1])
+    return [
+        f"Your zones may be set too low. On {r.run.start:%a %d %b} you held a median of "
+        f"{hr:.0f} bpm for {r.total_s / 60:.0f} min, above your zone 5 floor of {zones.z5}. "
+        "Zone 5 is meant to be a few minutes at most, so your real max heart rate is "
+        "probably higher than your zones assume. If you know it, pass --max-hr."
+    ]
+
+
 def analyse(runs: list[Run], zones: Zones) -> Report:
-    summaries = [summarise(r, zones) for r in sorted(runs, key=lambda r: r.start)]
-    return Report(zones=zones, runs=[s for s in summaries if s.total_s > 0])
+    kept: list[RunSummary] = []
+    skipped: list[tuple[Run, str]] = []
+    for run in sorted(runs, key=lambda r: r.start):
+        summary = summarise(trim_tail(run), zones)
+        reason = skip_reason(run, summary.total_s)
+        if reason:
+            skipped.append((run, reason))
+        else:
+            kept.append(summary)
+    return Report(zones=zones, runs=kept, skipped=skipped, warnings=zone_warnings(kept, zones))

@@ -75,7 +75,7 @@ def test_efficiency_needs_enough_runs(zones) -> None:
 
 def test_weekly_buckets_by_monday(zones) -> None:
     mon = datetime(2026, 10, 5, 7, tzinfo=UTC)
-    runs = [make_run([(600, 130)], start=mon), make_run([(600, 130)], start=mon + timedelta(6))]
+    runs = [make_run([(900, 130)], start=mon), make_run([(900, 130)], start=mon + timedelta(6))]
     weeks = analyse(runs, zones).weekly()
     assert len(weeks) == 1
     assert weeks[0][0].isoformat() == "2026-10-05"

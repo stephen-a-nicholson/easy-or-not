@@ -40,21 +40,13 @@ uv tool install easy-or-not
 
 ## Use it with your Garmin account
 
-1. In Garmin Connect, go to [Settings, Personal API Token](https://connect.garmin.com/app/settings/personalApiToken) and create a key. It is shown once.
-2. Save it where Garmin's own client looks for it, so it never appears in your shell history:
+```bash
+easy-or-not setup    # once: paste your Personal API key
+easy-or-not          # your last 8 weeks of runs
+easy-or-not garmin --days 90
+```
 
-   ```bash
-   mkdir -p ~/.config/garmin
-   pbpaste > ~/.config/garmin/connect-personal-api-key   # macOS; or paste it in with an editor
-   chmod 600 ~/.config/garmin/connect-personal-api-key
-   ```
-
-3. Run it:
-
-   ```bash
-   easy-or-not garmin              # last 8 weeks
-   easy-or-not garmin --days 90
-   ```
+`setup` tells you where to create the key in Garmin Connect ([Settings, Personal API Token](https://connect.garmin.com/app/settings/personalApiToken)), reads it without showing it on screen, saves it to `~/.config/garmin/connect-personal-api-key` readable only by you, and checks it with Garmin.
 
 Authentication is handled by Garmin's official [Python client](https://github.com/garmin/connect-personal-api-python), which also reads `GARMIN_PERSONAL_API_KEY` if you prefer an environment variable. Original activity files are cached in `~/.cache/easy-or-not`, so later runs only download new activities. Your heart-rate zones are read from your Garmin settings.
 
@@ -76,13 +68,17 @@ Without the API there are no Garmin zones to read, so pass your max heart rate.
 
 **Efficiency.** Metres covered per heartbeat while in the easy band, ignoring the first five minutes while heart rate catches up. The tool compares the median of your first third of outdoor easy runs with your last third. It needs at least six.
 
+**What gets left out.** Activities with under 10 minutes of heart-rate data (a GPS test, a watch started by accident), and walks logged as runs (median cadence under 140 steps per minute). A walk home or a watch left recording after the run is trimmed off the end, so it does not count as easy running. The report says how many were left out and why.
+
+**Zones that look too low.** If you held a median heart rate in zone 5 for half an hour or more, the report says your zones are probably set too low rather than telling you that you ran half an hour flat out.
+
 **Pauses.** Gaps of more than 10 seconds between samples (traffic lights, a stopped watch) are not counted.
 
 ## Limits
 
 - **Treadmill pace is an estimate.** Indoors, the watch works out speed from your wrist, so treadmill runs count towards time in zone but are left out of the efficiency trend.
 - **Heart rate is only as good as the sensor.** Wrist HR can lock on to cadence, especially in the first few minutes or in the cold. A chest strap gives cleaner numbers.
-- **Unverified against the live API.** The activity type and zone fields follow the shapes Garmin Connect has used for years and match Garmin's official client. If the Personal API returns something different, the tool says it found no runs or no zones rather than guessing. Please open an issue if that happens.
+- **Your zones decide the answer.** If the max heart rate in your Garmin settings is a guess, the bands are too. If you know your real max (from a race finish or a hard hill effort), pass `--max-hr`.
 - **It describes, it does not coach.** "44% of your easy running was in the middle" is a fact about your data. What to do about it is up to you.
 
 ## Development

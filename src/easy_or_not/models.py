@@ -13,6 +13,7 @@ class Sample:
     elapsed_s: float
     heart_rate: int | None
     speed_mps: float | None
+    cadence_spm: float | None = None  # steps per minute, both feet
 
 
 @dataclass
