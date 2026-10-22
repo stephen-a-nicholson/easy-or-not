@@ -34,8 +34,8 @@ Same heart rate, faster? (outdoor easy runs only)
 Python 3.12 or newer.
 
 ```bash
-uv tool install git+https://github.com/stephen-a-nicholson/easy-or-not
-# or: pipx install git+https://github.com/stephen-a-nicholson/easy-or-not
+uv tool install easy-or-not
+# or: pipx install easy-or-not
 ```
 
 ## Use it with your Garmin account
