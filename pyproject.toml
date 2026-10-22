@@ -1,6 +1,6 @@
 [project]
 name = "easy-or-not"
-version = "0.1.0"
+version = "0.1.1"
 description = "Are your easy runs actually easy? Time-in-zone and aerobic efficiency from your own Garmin data."
 readme = "README.md"
 license = "MIT"

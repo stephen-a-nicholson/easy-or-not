@@ -13,9 +13,9 @@ It works on FIT files you have exported, or straight from your account with a [G
   easy below 154 bpm   middle 154-172 bpm   hard 173+ bpm
 
 Where your running time went
-  easy     47%  ##############................
-  middle   27%  ########......................
-  hard     25%  ########......................
+  easy     47%  ██████████████░░░░░░░░░░░░░░░░
+  middle   27%  ████████░░░░░░░░░░░░░░░░░░░░░░
+  hard     25%  ████████░░░░░░░░░░░░░░░░░░░░░░
   A common target is around 80% easy with the rest mostly hard.
 
 Your easy runs (18 of 30, sessions excluded)

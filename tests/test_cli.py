@@ -49,7 +49,7 @@ def test_bare_command_reads_garmin(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setattr(garmin, "fetch", fake_fetch)
     assert main([]) == 0
     assert calls == [56]
-    assert "1 runs" in capsys.readouterr().out
+    assert "1 run," in capsys.readouterr().out
 
 
 def test_missing_key_points_to_setup(monkeypatch, capsys) -> None:

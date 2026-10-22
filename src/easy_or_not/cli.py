@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from typing import TextIO
 
 from easy_or_not import __version__
 from easy_or_not.analysis import analyse
 from easy_or_not.fit import NotARun, load_path
 from easy_or_not.models import Run
-from easy_or_not.report import render_json, render_text
+from easy_or_not.report import Style, render_json, render_text
 from easy_or_not.zones import Zones, from_max_hr
 
 DEFAULT_CACHE = Path("~/.cache/easy-or-not").expanduser()
@@ -44,6 +47,21 @@ def build_parser() -> argparse.ArgumentParser:
     garmin.add_argument("--days", type=int, default=56, help="how far back to look (default 56)")
     garmin.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE)
     return p
+
+
+def terminal_style(stream: TextIO, env: Mapping[str, str]) -> Style:
+    """Colour only on a real terminal, never when piped or when NO_COLOR is set.
+
+    Block bars only when the output encoding can carry them (a Windows code
+    page redirected to a file cannot).
+    """
+    colour = stream.isatty() and not env.get("NO_COLOR") and env.get("TERM") != "dumb"
+    try:
+        "\u2588\u2591".encode(stream.encoding or "ascii")
+        blocks = True
+    except (LookupError, UnicodeEncodeError):
+        blocks = False
+    return Style(colour=colour, blocks=blocks)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,7 +106,10 @@ def main(argv: list[str] | None = None) -> int:
     # From the API, load is measured to today, so a week off shows as a week off.
     as_of = date.today() if args.source == "garmin" else None
     report = analyse(runs, zones, as_of=as_of)
-    print(render_json(report) if args.json else render_text(report))
+    if args.json:
+        print(render_json(report))
+    else:
+        print(render_text(report, terminal_style(sys.stdout, os.environ)))
     return 0
 
 
