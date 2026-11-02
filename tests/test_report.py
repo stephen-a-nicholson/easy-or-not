@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from datetime import UTC, date, datetime
 
 from easy_or_not.analysis import analyse
 from easy_or_not.cli import terminal_style
@@ -68,3 +69,9 @@ def test_no_easy_runs_says_so(zones) -> None:
 
 def test_one_run_is_singular(zones) -> None:
     assert render_text(_report(zones)).startswith("1 run,")
+
+
+def test_four_weeks_off_does_not_break_the_report(zones) -> None:
+    run = make_run([(1800, 130)], start=datetime(2026, 9, 7, 7, tzinfo=UTC))
+    text = render_text(analyse([run], zones, as_of=date(2026, 11, 2)))
+    assert "Needs 4 weeks of runs" in text

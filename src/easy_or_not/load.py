@@ -61,7 +61,8 @@ def status(report: Report) -> LoadStatus | None:
     chronic = None
     if runs[0].run.start.date() <= history_start:
         weeks = CHRONIC_DAYS / ACUTE_DAYS
-        chronic = _load_between(runs, history_start, end) / weeks
+        # No load in four weeks leaves nothing to compare with, the same as no history.
+        chronic = _load_between(runs, history_start, end) / weeks or None
     return LoadStatus(as_of=end, acute=acute, chronic=chronic)
 
 

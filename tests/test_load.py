@@ -61,6 +61,13 @@ def test_needs_four_weeks_of_history(zones) -> None:
     assert s.chronic is None and s.ratio is None and s.verdict is None
 
 
+def test_four_weeks_off_has_nothing_to_compare_with(zones) -> None:
+    runs = _runs_every_other_day(2)
+    s = load.status(analyse(runs, zones, as_of=(MONDAY + timedelta(days=60)).date()))
+    assert s is not None and s.acute == 0
+    assert s.chronic is None and s.ratio is None and s.verdict is None
+
+
 def test_short_runs_count_towards_load_but_walks_do_not(zones) -> None:
     run = make_run([(1800, 130)], start=MONDAY, cadence=166)
     short = make_run([(300, 150)], start=MONDAY + timedelta(hours=5), cadence=166)
