@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="highest heart-rate zone that counts as easy (default 2; try 3 on Garmin defaults)",
     )
     p.add_argument("--json", action="store_true", help="print JSON instead of text")
+    p.add_argument(
+        "--as-of",
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="the report as it would have looked on that day (default today)",
+    )
     p.set_defaults(days=56, cache_dir=DEFAULT_CACHE)  # for a bare `easy-or-not`
     sub = p.add_subparsers(dest="source", metavar="{garmin,readiness,files,setup,databricks}")
 
@@ -99,8 +105,12 @@ def terminal_style(stream: TextIO, env: Mapping[str, str]) -> Style:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     args.source = args.source or "garmin"
+    if args.as_of and args.as_of > date.today():
+        parser.error(f"--as-of {args.as_of} is in the future")
+    today = args.as_of or date.today()
     zones: Zones | None = None
     runs: list[Run] = []
     wellness: dict[date, Day] = {}
@@ -121,22 +131,27 @@ def main(argv: list[str] | None = None) -> int:
         from easy_or_not.garmin import GarminPersonalApiError, fetch, fetch_wellness
 
         days = WELLNESS_DAYS if args.source == "readiness" else args.days
+        # Garmin's windows end today, so reach further back when reporting as of an earlier day.
+        back = (date.today() - today).days
         try:
-            runs, zones = fetch(max(days, WELLNESS_DAYS), args.cache_dir, quiet=args.json)
-            wellness = fetch_wellness(WELLNESS_DAYS, quiet=args.json)
+            runs, zones = fetch(max(days, WELLNESS_DAYS) + back, args.cache_dir, quiet=args.json)
+            wellness = fetch_wellness(WELLNESS_DAYS + back, quiet=args.json)
         except GarminPersonalApiError as e:
             print(f"Could not reach your Garmin account: {e}", file=sys.stderr)
             print("If you have not saved a key yet, run: easy-or-not setup", file=sys.stderr)
             return 2
+        # Nothing after the day being reported on, as if it had not happened yet.
+        runs = [r for r in runs if r.start.date() <= today]
+        wellness = {d: v for d, v in wellness.items() if d <= today}
         if args.source == "garmin":
             # Load covers the requested window; readiness needs at least five weeks.
-            cutoff = date.today() - timedelta(days=args.days)
+            cutoff = today - timedelta(days=args.days)
             runs = [r for r in runs if r.start.date() >= cutoff]
 
     if args.max_hr:
         zones = from_max_hr(args.max_hr)
     if args.source == "readiness":
-        return _readiness(args, runs, zones, wellness)
+        return _readiness(args, runs, zones, wellness, today)
     if zones is None:
         print(
             "No heart-rate zones: pass --max-hr, or use the garmin source to read yours.",
@@ -149,20 +164,24 @@ def main(argv: list[str] | None = None) -> int:
 
     zones = replace(zones, easy_up_to=args.easy_up_to)
     # From the API, load is measured to today, so a week off shows as a week off.
-    as_of = date.today() if args.source == "garmin" else None
+    # From files it is measured to the last run, unless a day was asked for.
+    as_of = today if args.source == "garmin" else args.as_of
     report = analyse(runs, zones, as_of=as_of)
-    today = assess(wellness, date.today(), load.status(report)) if args.source == "garmin" else None
+    readiness = assess(wellness, today, load.status(report)) if args.source == "garmin" else None
     if args.json:
-        print(render_json(report, today))
+        print(render_json(report, readiness))
     else:
-        print(render_text(report, terminal_style(sys.stdout, os.environ), today))
+        print(render_text(report, terminal_style(sys.stdout, os.environ), readiness))
     return 0
 
 
 def _readiness(
-    args: argparse.Namespace, runs: list[Run], zones: Zones | None, wellness: dict[date, Day]
+    args: argparse.Namespace,
+    runs: list[Run],
+    zones: Zones | None,
+    wellness: dict[date, Day],
+    today: date,
 ) -> int:
-    today = date.today()
     load_status = None
     if zones is not None and runs:
         load_status = load.status(analyse(runs, zones, as_of=today))

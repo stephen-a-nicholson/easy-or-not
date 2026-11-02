@@ -157,6 +157,83 @@ def test_main_report_includes_readiness(monkeypatch, capsys) -> None:
     assert "Readiness for" in capsys.readouterr().out
 
 
+def _fake_garmin_as_of(monkeypatch):
+    """Runs either side of 31 Oct 2026, wellness for that day, and the fetch windows asked for."""
+    from datetime import UTC, date, datetime
+
+    from easy_or_not import garmin
+    from easy_or_not.wellness import Day
+
+    from .conftest import make_run
+
+    asked = {}
+    runs = [
+        make_run([(1800, 130)], start=datetime(2026, 10, 29, 7, tzinfo=UTC), run_id="before"),
+        make_run([(1800, 130)], start=datetime(2026, 11, 1, 7, tzinfo=UTC), run_id="after"),
+    ]
+    wellness = {
+        date(2026, 10, 31): Day(day=date(2026, 10, 31), hrv=90, hrv_low=82, hrv_high=97),
+        date(2026, 11, 1): Day(day=date(2026, 11, 1), hrv=50, hrv_low=82, hrv_high=97),
+    }
+
+    def fake_fetch(days, cache_dir, quiet=False):
+        asked["runs"] = days
+        return runs, from_max_hr(190)
+
+    def fake_wellness(days, quiet=False):
+        asked["wellness"] = days
+        return wellness
+
+    monkeypatch.setattr(garmin, "fetch", fake_fetch)
+    monkeypatch.setattr(garmin, "fetch_wellness", fake_wellness)
+    return asked
+
+
+def test_as_of_reports_an_earlier_day(monkeypatch, capsys) -> None:
+    from datetime import date
+
+    asked = _fake_garmin_as_of(monkeypatch)
+    assert main(["--json", "--as-of", "2026-10-31"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    # The run after that day is left out, and readiness is for that day's night.
+    assert [r["id"] for r in data["runs"]] == ["before"]
+    assert data["readiness"]["day"] == "2026-10-31"
+    assert data["readiness"]["signals"][0]["value"] == "90 ms"
+    assert data["load"]["as_of"] == "2026-10-31"
+    # Garmin's windows end today, so the fetch reached back far enough to cover the day.
+    back = (date.today() - date(2026, 10, 31)).days
+    assert asked == {"runs": 56 + back, "wellness": 35 + back}
+
+
+def test_as_of_readiness_command(monkeypatch, capsys) -> None:
+    _fake_garmin_as_of(monkeypatch)
+    assert main(["--as-of", "2026-10-31", "readiness"]) == 0
+    out = capsys.readouterr().out
+    assert "Readiness for Sat 31 Oct" in out
+    assert "Sun 01 Nov" not in out
+
+
+def test_as_of_with_files_sets_the_load_date(tmp_path, capsys) -> None:
+    (tmp_path / "a.fit").write_bytes(fit_bytes())  # 20 Oct 2026
+    assert main(["--max-hr", "190", "--as-of", "2026-10-31", "files", str(tmp_path)]) == 0
+    assert "Last 7 days to Sat 31 Oct" in capsys.readouterr().out
+
+
+def test_as_of_rejects_the_future(capsys) -> None:
+    import pytest
+
+    with pytest.raises(SystemExit):
+        main(["--as-of", "2999-01-01"])
+    assert "in the future" in capsys.readouterr().err
+
+
+def test_as_of_rejects_a_bad_date() -> None:
+    import pytest
+
+    with pytest.raises(SystemExit):
+        main(["--as-of", "31/10/2026"])
+
+
 def test_files_report_has_no_readiness(tmp_path, capsys) -> None:
     (tmp_path / "a.fit").write_bytes(fit_bytes(minutes=30, hr=135))
     assert main(["--max-hr", "190", "files", str(tmp_path)]) == 0

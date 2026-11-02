@@ -52,6 +52,7 @@ easy-or-not setup    # once: paste your Personal API key
 easy-or-not          # your last 8 weeks of runs
 easy-or-not garmin --days 90
 easy-or-not readiness   # today's readiness and the last 7 nights
+easy-or-not --as-of 2026-10-31   # the report as it would have looked that morning
 ```
 
 `setup` tells you where to create the key in Garmin Connect ([Settings, Personal API Token](https://connect.garmin.com/app/settings/personalApiToken)), reads it without showing it on screen, saves it to `~/.config/garmin/connect-personal-api-key` readable only by you, and checks it with Garmin.
