@@ -21,7 +21,7 @@ Code: `src/easy_or_not/` (`fit.py` parsing, `zones.py` bands, `checks.py` data s
 
 Goal: one command deploys a Databricks Declarative Automation Bundle that runs the tool on a schedule, lands the results in Delta, and creates a Genie space so the owner can ask questions like "which weeks did I train too hard?" in plain English. The local tool stays exactly as it is for everyone else.
 
-**State on 2 Nov 2026:** all four steps done except publishing. Deployed for real to the owner's workspace (profile `agent-factory-dev`, catalog `workspace`, schema `running`, target `dev`, with `--wheel` since 0.3.0 is not on PyPI): 30 runs, 35 days and 9 weeks landed with every column comment, and the Genie space answered "which weeks did I train too hard?" with sensible SQL. Live findings, all fixed in code:
+**State on 2 Nov 2026:** all four steps done; 0.3.0 published to PyPI (also adds `--as-of`). Deployed for real to the owner's workspace (profile `agent-factory-dev`, catalog `workspace`, schema `running`, target `dev`, with `--wheel` since 0.3.0 is not on PyPI): 30 runs, 35 days and 9 weeks landed with every column comment, and the Genie space answered "which weeks did I train too hard?" with sensible SQL. Live findings, all fixed in code:
 
 - `databricks --version` takes no `-p`; `Cli` skips the profile for bare flags.
 - Relative paths in `resources/job.yml` resolve from `resources/`, so a local wheel is `../wheels/<name>`.
@@ -70,7 +70,7 @@ easy-or-not databricks destroy
 1. Done. Templates and `land`, with tests, before any CLI wiring.
 2. Done. `deploy`/`destroy` with the CLI checks and secret handling.
 3. Done (2 Nov 2026), see the live findings above. On WSL, `databricks auth login` mangles the OAuth URL when it opens the Windows browser (the `&`s are lost); open the printed URL with `powershell.exe -Command "Start-Process '<url>'"` instead.
-4. Done except publishing. README section, `docs/databricks.md`, 0.3.0 bump. **Next:** publish with `gh workflow run publish.yml`, then redeploy without `--wheel` to prove the PyPI path.
+4. Done. README section, `docs/databricks.md`, 0.3.0 published 2 Nov 2026. **Next:** redeploy without `--wheel` to prove the PyPI path on the job. Note `gh workflow run` fires on whatever `main` GitHub has, so push first and never chain it after a piped `git push`.
 
 ### Still open from before
 
