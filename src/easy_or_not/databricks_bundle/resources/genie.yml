@@ -1,0 +1,8 @@
+resources:
+  genie_spaces:
+    easy_or_not:
+      title: Easy or not
+      description: Your runs, overnight recovery and training load from easy-or-not. Ask in plain English.
+      warehouse_id: {{warehouse_id}}
+      parent_path: /Workspace/Users/{{user}}
+      file_path: ../src/easy_or_not.geniespace.json

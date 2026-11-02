@@ -1,0 +1,36 @@
+resources:
+  volumes:
+    cache:
+      catalog_name: {{catalog}}
+      schema_name: {{schema}}
+      name: easy_or_not_cache
+      volume_type: MANAGED
+      comment: Activity files downloaded from Garmin, kept between runs so each run only fetches new ones.
+
+  jobs:
+    daily:
+      name: easy-or-not daily
+      description: Fetches your runs and overnight data from Garmin and writes the runs, days and weeks tables.
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 30 6 * * ?"
+        timezone_id: {{timezone}}
+      tasks:
+        - task_key: land
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/land.py
+            parameters:
+              - --catalog
+              - {{catalog}}
+              - --schema
+              - {{schema}}
+              - --cache-dir
+              - /Volumes/{{catalog}}/{{schema}}/${resources.volumes.cache.name}
+      environments:
+        - environment_key: default
+          spec:
+            # Version 4 runs Python 3.12, the oldest easy-or-not supports.
+            environment_version: "4"
+            dependencies:
+              - easy-or-not=={{version}}

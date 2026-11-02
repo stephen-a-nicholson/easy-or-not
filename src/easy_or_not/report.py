@@ -171,6 +171,7 @@ def render_json(report: Report, readiness: Readiness | None = None) -> str:
                     "treadmill": r.run.treadmill,
                     "session": r.is_session,
                     "seconds": r.seconds,
+                    "zone_seconds": {str(z): r.zone_seconds.get(z, 0.0) for z in range(1, 6)},
                     "efficiency": r.efficiency,
                     "load": r.load,
                 }

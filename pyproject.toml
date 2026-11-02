@@ -25,7 +25,7 @@ Homepage = "https://github.com/stephen-a-nicholson/easy-or-not"
 Issues = "https://github.com/stephen-a-nicholson/easy-or-not/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6", "fit-tool>=0.9"]
+dev = ["pytest>=8", "ruff>=0.6", "fit-tool>=0.9", "pyyaml>=6"]
 
 [project.scripts]
 easy-or-not = "easy_or_not.cli:main"

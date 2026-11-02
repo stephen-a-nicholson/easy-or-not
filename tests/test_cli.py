@@ -23,6 +23,11 @@ def test_json_output(tmp_path, capsys) -> None:
     data = json.loads(capsys.readouterr().out)
     assert set(data["totals"]) == {"easy", "middle", "hard"}
     assert len(data["runs"]) == 1
+    # 130 bpm is zone 1 on max HR 190; every zone is listed, empty ones as 0.
+    zone_seconds = data["runs"][0]["zone_seconds"]
+    assert list(zone_seconds) == ["1", "2", "3", "4", "5"]
+    assert zone_seconds["1"] > 0
+    assert sum(zone_seconds.values()) == sum(data["runs"][0]["seconds"].values())
 
 
 def test_files_without_zones_is_an_error(tmp_path, capsys) -> None:

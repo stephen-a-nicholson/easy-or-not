@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "config": {
+    "sample_questions": [
+      {"id": "0116553773bf419e8efbfa4628b7f059", "question": ["Which weeks did I train too hard?"]},
+      {"id": "32ac2eca92f64222920164d90671cd0d", "question": ["What share of my running time was easy each week?"]},
+      {"id": "69c0a9d670fc4a4797acecf6ac96b9a3", "question": ["Which easy runs drifted most into the middle band?"]},
+      {"id": "7589bff688094c8d9f02d0a58978121e", "question": ["Is my efficiency on outdoor easy runs improving?"]},
+      {"id": "8343aa1edf6b4d728f2b7da121007042", "question": ["On which days was my sleep score under 60?"]},
+      {"id": "c68d688d6146420083d44ba8fde3f642", "question": ["Is my resting heart rate higher after weeks with more load?"]}
+    ]
+  },
+  "data_sources": {
+    "tables": [
+      {"identifier": "{{catalog}}.{{schema}}.days"},
+      {"identifier": "{{catalog}}.{{schema}}.runs"},
+      {"identifier": "{{catalog}}.{{schema}}.weeks"}
+    ]
+  },
+  "instructions": {
+    "text_instructions": [
+      {
+        "id": "f9fb1a3da7354a6ba92342a7ff8a2d22",
+        "content": [
+          "These tables come from easy-or-not, which reads one runner's own Garmin data. ",
+          "Heart rate is grouped into three bands from the runner's Garmin zones: easy is zones 1 and 2, middle is zone 3, hard is zones 4 and 5. ",
+          "A common target is around 80 percent of running time easy, with most of the rest hard and little in the middle. ",
+          "A run is a session when at least 10 percent of its time is hard; every other run was meant to be easy. ",
+          "Drift means time in the middle band on runs that were meant to be easy. ",
+          "Load is Edwards TRIMP: minutes in each heart-rate zone multiplied by the zone number, so a minute in zone 5 counts five times a minute in zone 1. ",
+          "The load ratio is the last 7 days of load divided by the average weekly load over the last 28 days. Below 0.8 is lighter than usual, 0.8 to 1.3 is in line, 1.3 to 1.5 is a step up, and above 1.5 is a big jump. ",
+          "A week trained too hard is one with a high load ratio or a high share of middle and hard time; say which measure you used. ",
+          "Efficiency is metres per heartbeat in the easy band after a five minute warm-up, on outdoor runs only. Higher is better. Treadmill runs have no meaningful efficiency. ",
+          "Readiness in the days table is the tool's own estimate from overnight HRV, resting heart rate, sleep score and load. It is not Garmin's Training Readiness, and it is only computed for the most recent day. ",
+          "Missing values mean the watch recorded nothing, not zero. Convert seconds to minutes or hours when answering."
+        ]
+      }
+    ]
+  }
+}

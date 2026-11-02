@@ -1,0 +1,17 @@
+# Written by `easy-or-not databricks deploy`. It is rewritten on every deploy,
+# so change the options you deploy with rather than editing this file.
+bundle:
+  name: easy-or-not
+
+include:
+  - resources/*.yml
+
+targets:
+  # Development mode pauses the daily schedule and prefixes resource names.
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Users/{{user}}/.bundle/${bundle.name}/${bundle.target}
