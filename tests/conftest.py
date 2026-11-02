@@ -104,3 +104,19 @@ def no_garmin_network(monkeypatch) -> None:
 
     monkeypatch.setattr(garmin, "PersonalApiAuthenticator", _NoNetwork)
     monkeypatch.setattr(garmin, "GarminPersonalApiClient", _NoNetwork)
+
+
+def _no_cli(*args, **kwargs) -> str:
+    raise AssertionError("a test tried to run the Databricks CLI; fake run_cli instead")
+
+
+@pytest.fixture(autouse=True)
+def no_databricks(monkeypatch, tmp_path) -> None:
+    """Tests never run the real Databricks CLI, read the real key file or write
+    the real bundle directory. deploy and destroy look these up at call time,
+    so replacing them here catches every path."""
+    from easy_or_not import databricks
+
+    monkeypatch.setattr(databricks, "run_cli", _no_cli)
+    monkeypatch.setattr(databricks, "DEFAULT_KEY_FILE", tmp_path / "no-such-key")
+    monkeypatch.setattr(databricks, "DEFAULT_BUNDLE_DIR", tmp_path / "no-such-bundle")

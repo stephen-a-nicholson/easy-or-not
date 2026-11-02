@@ -2,14 +2,19 @@
 
 Nothing here imports pyspark or the Databricks SDK. `land` writes with the
 Spark session it is given, so it can be tested with a fake, and the base
-install never needs either.
+install never needs either. `deploy` and `destroy` drive the Databricks CLI,
+which the user installs separately; tests replace `run_cli` with a fake.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
-from collections.abc import Iterator, Mapping
+import subprocess
+import zoneinfo
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from importlib import resources
@@ -17,8 +22,18 @@ from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
+from easy_or_not import __version__
+
 SECRET_SCOPE = "easy-or-not"
 SECRET_KEY = "garmin-key"
+
+# Secret scopes and Genie spaces as bundle resources both need a CLI from 2026.
+MIN_CLI = (1, 3, 0)
+CLI_INSTALL = "https://docs.databricks.com/dev-tools/cli/install.html"
+DEFAULT_BUNDLE_DIR = Path("~/.config/easy-or-not/databricks").expanduser()
+DEFAULT_KEY_FILE = Path("~/.config/garmin/connect-personal-api-key").expanduser()
+JOB_KEY = "daily"
+GENIE_KEY = "easy_or_not"
 
 BUNDLE_PACKAGE = "databricks_bundle"
 PLACEHOLDERS = ("catalog", "schema", "user", "version", "warehouse_id", "timezone")
@@ -294,3 +309,238 @@ def land(
         frame = spark.createDataFrame(table_rows, schema=table.ddl)
         frame.write.mode("append").saveAsTable(f"{catalog}.{schema}.{table.name}")
     return {table.name: len(table_rows) for table, table_rows in rows.items()}
+
+
+# Deploy and destroy. Everything remote goes through the Databricks CLI so
+# the user's existing profiles and login just work.
+
+
+class DatabricksError(Exception):
+    """Something the user needs to fix, with a message that says what."""
+
+
+Runner = Callable[..., str]
+
+
+def run_cli(args: list[str], *, input: str | None = None, cwd: Path | None = None) -> str:
+    """Run one Databricks CLI command and return its stdout.
+
+    `input` is for the secret only. It never goes into an argument, the error
+    message or anything printed.
+    """
+    try:
+        result = subprocess.run(
+            ["databricks", *args], input=input, capture_output=True, text=True, cwd=cwd
+        )
+    except FileNotFoundError:
+        raise DatabricksError(
+            f"The Databricks CLI is not installed. Install it from {CLI_INSTALL}"
+        ) from None
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise DatabricksError(f"databricks {' '.join(args)} failed: {detail}")
+    return result.stdout
+
+
+class Cli:
+    """The CLI with a profile and bundle directory already chosen."""
+
+    def __init__(self, run: Runner, profile: str | None, bundle_dir: Path) -> None:
+        self._run, self.profile, self.bundle_dir = run, profile, bundle_dir
+
+    def __call__(self, *args: str, input: str | None = None) -> str:
+        argv = list(args) + (["-p", self.profile] if self.profile else [])
+        # bundle commands only work from inside the bundle directory.
+        cwd = self.bundle_dir if args[0] == "bundle" else None
+        return self._run(argv, input=input, cwd=cwd)
+
+    def json(self, *args: str) -> Any:
+        out = self(*args, "-o", "json")
+        try:
+            return json.loads(out)
+        except json.JSONDecodeError:
+            raise DatabricksError(f"databricks {' '.join(args)} did not return JSON") from None
+
+
+def check_cli(cli: Cli) -> None:
+    out = cli("--version")
+    m = re.search(r"v?(\d+)\.(\d+)\.(\d+)", out)
+    if m is None:
+        raise DatabricksError(f"Could not read the Databricks CLI version from {out.strip()!r}")
+    version = tuple(int(x) for x in m.groups())
+    if version < MIN_CLI:
+        wanted = ".".join(map(str, MIN_CLI))
+        raise DatabricksError(
+            f"Databricks CLI {'.'.join(map(str, version))} is too old; "
+            f"easy-or-not needs {wanted} or later. See {CLI_INSTALL}"
+        )
+
+
+def read_key(path: Path = DEFAULT_KEY_FILE) -> str:
+    """The Garmin key `easy-or-not setup` saved. Returned, never printed."""
+    try:
+        key = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        key = ""
+    if not key:
+        raise DatabricksError(f"No Garmin key at {path}. Run: easy-or-not setup")
+    return key
+
+
+def current_user(cli: Cli) -> str:
+    me = cli.json("current-user", "me")
+    user = me.get("userName") if isinstance(me, dict) else None
+    if not user:
+        raise DatabricksError("Could not work out who you are logged in as")
+    return str(user)
+
+
+def pick_warehouse(cli: Cli, name: str | None = None) -> str:
+    """A SQL warehouse for Genie: the one named, else the first serverless one."""
+    warehouses = [w for w in cli.json("warehouses", "list") if isinstance(w, dict)]
+    if name:
+        matches = [w for w in warehouses if w.get("name") == name or w.get("id") == name]
+        if not matches:
+            raise DatabricksError(f"No SQL warehouse called {name!r}")
+        return str(matches[0]["id"])
+    serverless = [w for w in warehouses if w.get("enable_serverless_compute")]
+    chosen = serverless or warehouses
+    if not chosen:
+        raise DatabricksError(
+            "No SQL warehouse found. Genie needs one; create a serverless warehouse "
+            "or pass --warehouse"
+        )
+    return str(chosen[0]["id"])
+
+
+def ensure_schema(cli: Cli, catalog: str, schema: str) -> bool:
+    """Create the schema if it is missing. Returns True when it was created.
+
+    The schema is not a bundle resource on purpose: `destroy` would drop the
+    tables with it.
+    """
+    try:
+        cli("schemas", "get", f"{catalog}.{schema}")
+        return False
+    except DatabricksError:
+        cli("schemas", "create", schema, catalog)
+        return True
+
+
+def put_secret(cli: Cli, key: str) -> None:
+    try:
+        cli("secrets", "create-scope", SECRET_SCOPE)
+    except DatabricksError as e:
+        if "already exists" not in str(e).lower():
+            raise
+    # On stdin, so the key is never in a process list or a shell history.
+    cli("secrets", "put-secret", SECRET_SCOPE, SECRET_KEY, input=key)
+
+
+def local_timezone(environ: Mapping[str, str] = os.environ) -> str:
+    """The machine's IANA zone, for the job schedule. UTC when it cannot be found."""
+    candidates = [environ.get("TZ", "")]
+    with contextlib.suppress(OSError):
+        candidates.append(Path("/etc/timezone").read_text(encoding="utf-8").strip())
+    with contextlib.suppress(OSError):
+        link = os.readlink("/etc/localtime")
+        candidates.append(link.split("zoneinfo/", 1)[1] if "zoneinfo/" in link else "")
+    for name in candidates:
+        if name and _valid_timezone(name):
+            return name
+    return "UTC"
+
+
+def _valid_timezone(name: str) -> bool:
+    try:
+        zoneinfo.ZoneInfo(name)
+        return True
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        return False
+
+
+def genie_url(summary: Any) -> str | None:
+    try:
+        return summary["resources"]["genie_spaces"][GENIE_KEY]["url"] or None
+    except (KeyError, TypeError):
+        return None
+
+
+@dataclass(frozen=True)
+class DeployOptions:
+    catalog: str
+    schema: str
+    profile: str | None = None
+    target: str = "dev"
+    warehouse: str | None = None
+    timezone: str | None = None
+    bundle_dir: Path | None = None  # DEFAULT_BUNDLE_DIR
+    key_file: Path | None = None  # DEFAULT_KEY_FILE
+
+
+def deploy(
+    options: DeployOptions, run: Runner | None = None, out: Callable[[str], None] = print
+) -> str:
+    """Deploy the bundle, store the key, run the job once. Returns the Genie URL."""
+    # Defaults are looked up at call time so tests can replace them on the module.
+    bundle_dir = options.bundle_dir or DEFAULT_BUNDLE_DIR
+    cli = Cli(run or run_cli, options.profile, bundle_dir)
+    check_cli(cli)
+    key = read_key(options.key_file or DEFAULT_KEY_FILE)  # fail before touching the workspace
+    timezone = options.timezone or local_timezone()
+    if not _valid_timezone(timezone):
+        raise DatabricksError(f"Unknown timezone {timezone!r}; use an IANA name like Europe/London")
+
+    user = current_user(cli)
+    out(f"Deploying as {user} to target {options.target}")
+    warehouse_id = pick_warehouse(cli, options.warehouse)
+    if ensure_schema(cli, options.catalog, options.schema):
+        out(f"Created schema {options.catalog}.{options.schema}")
+    write_bundle(
+        {
+            "catalog": options.catalog,
+            "schema": options.schema,
+            "user": user,
+            "version": __version__,
+            "warehouse_id": warehouse_id,
+            "timezone": timezone,
+        },
+        bundle_dir,
+    )
+    out(f"Bundle written to {bundle_dir}")
+    put_secret(cli, key)
+    out(f"Garmin key stored in secret scope {SECRET_SCOPE}")
+    cli("bundle", "deploy", "--auto-approve", "-t", options.target)
+    out("Bundle deployed; running the job once (this fetches your runs from Garmin)")
+    cli("bundle", "run", JOB_KEY, "-t", options.target)
+    summary = cli.json("bundle", "summary", "-t", options.target)
+    url = genie_url(summary)
+    out(f"Tables are in {options.catalog}.{options.schema}: runs, days, weeks")
+    out(f"Genie space: {url}" if url else "Genie space: see databricks bundle summary")
+    paused = " (paused in dev)" if options.target == "dev" else ""
+    out(f"The job runs daily at 06:30 {timezone}{paused}")
+    return url or ""
+
+
+def destroy(
+    profile: str | None = None,
+    target: str = "dev",
+    bundle_dir: Path | None = None,
+    run: Runner | None = None,
+    out: Callable[[str], None] = print,
+) -> None:
+    """Remove the job, volume and Genie space, and the secret. The tables stay."""
+    bundle_dir = bundle_dir or DEFAULT_BUNDLE_DIR
+    cli = Cli(run or run_cli, profile, bundle_dir)
+    check_cli(cli)
+    if not (bundle_dir / "databricks.yml").is_file():
+        raise DatabricksError(f"No bundle at {bundle_dir}; nothing to destroy")
+    cli("bundle", "destroy", "--auto-approve", "-t", target)
+    out("Job, cache volume and Genie space removed")
+    try:
+        cli("secrets", "delete-scope", SECRET_SCOPE)
+        out(f"Secret scope {SECRET_SCOPE} deleted")
+    except DatabricksError as e:
+        if "does not exist" not in str(e).lower() and "not found" not in str(e).lower():
+            raise
+    out("The runs, days and weeks tables were left in place; drop them yourself if you want")

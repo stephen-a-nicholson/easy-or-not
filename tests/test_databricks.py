@@ -332,3 +332,281 @@ def test_base_package_imports_without_spark_or_the_sdk() -> None:
         "import easy_or_not.cli, easy_or_not.databricks\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+# Deploy and destroy
+
+
+KEY = "not-a-real-garmin-key"
+# Captured before the autouse fixture replaces it, for the two tests of run_cli itself.
+REAL_RUN_CLI = databricks.run_cli
+WAREHOUSES = [
+    {"id": "classic1", "name": "Classic", "enable_serverless_compute": False},
+    {"id": "sls1", "name": "Serverless", "enable_serverless_compute": True},
+]
+
+
+class FakeCli:
+    """Stands in for run_cli: records every call, answers from a table of prefixes."""
+
+    def __init__(
+        self, responses: dict[str, str] | None = None, fail: dict[str, str] | None = None
+    ) -> None:
+        self.calls: list[tuple[list[str], object]] = []
+        self.inputs: list[str | None] = []  # stdin, kept apart from the arguments
+        self.responses = {
+            "--version": "Databricks CLI v1.16.0\n",
+            "current-user me": json.dumps({"userName": "runner@example.com"}),
+            "warehouses list": json.dumps(WAREHOUSES),
+            "bundle summary": json.dumps(
+                {"resources": {"genie_spaces": {"easy_or_not": {"url": "https://x/genie/1"}}}}
+            ),
+            **(responses or {}),
+        }
+        self.fail = fail or {}
+
+    def __call__(self, args: list[str], *, input: str | None = None, cwd=None) -> str:
+        self.calls.append((list(args), cwd))
+        self.inputs.append(input)
+        line = " ".join(args)
+        for prefix, message in self.fail.items():
+            if line.startswith(prefix):
+                raise databricks.DatabricksError(message)
+        for prefix, response in self.responses.items():
+            if line.startswith(prefix):
+                return response
+        return ""
+
+    def commands(self) -> list[str]:
+        """Each call as 'group verb', or just the flag for --version."""
+        return [a[0] if a[0].startswith("-") else " ".join(a[:2]) for a, _ in self.calls]
+
+
+def _options(tmp_path, **kw) -> databricks.DeployOptions:
+    key_file = tmp_path / "key"
+    key_file.write_text(KEY + "\n")
+    defaults = {
+        "catalog": "main",
+        "schema": "running",
+        "timezone": "Europe/London",
+        "bundle_dir": tmp_path / "bundle",
+        "key_file": key_file,
+    }
+    return databricks.DeployOptions(**{**defaults, **kw})
+
+
+def test_deploy_end_to_end(tmp_path) -> None:
+    cli = FakeCli()
+    lines: list[str] = []
+    url = databricks.deploy(_options(tmp_path, profile="work"), run=cli, out=lines.append)
+
+    assert cli.commands() == [
+        "--version",
+        "current-user me",
+        "warehouses list",
+        "schemas get",
+        "secrets create-scope",
+        "secrets put-secret",
+        "bundle deploy",
+        "bundle run",
+        "bundle summary",
+    ]
+    assert url == "https://x/genie/1"
+    assert any("https://x/genie/1" in line for line in lines)
+
+    # Every call carries the profile; bundle commands run inside the bundle directory.
+    for args, cwd in cli.calls:
+        assert args[-2:] == ["-p", "work"]
+        assert (cwd == tmp_path / "bundle") == (args[0] == "bundle")
+    deploy_args = next(a for a, _ in cli.calls if a[:2] == ["bundle", "deploy"])
+    assert "-t" in deploy_args and deploy_args[deploy_args.index("-t") + 1] == "dev"
+
+    # The bundle got the live values: the first serverless warehouse, the user, the version.
+    job = (tmp_path / "bundle" / "resources" / "job.yml").read_text()
+    genie = (tmp_path / "bundle" / "resources" / "genie.yml").read_text()
+    assert f"easy-or-not=={databricks.__version__}" in job
+    assert "Europe/London" in job
+    assert "warehouse_id: sls1" in genie
+    assert "runner@example.com" in genie
+
+
+def test_deploy_only_passes_the_key_on_stdin(tmp_path) -> None:
+    cli = FakeCli()
+    lines: list[str] = []
+    databricks.deploy(_options(tmp_path), run=cli, out=lines.append)
+    for args, _ in cli.calls:
+        assert KEY not in " ".join(args)
+    assert KEY not in "\n".join(lines)
+    for path in (tmp_path / "bundle").rglob("*"):
+        if path.is_file():
+            assert KEY not in path.read_text()
+    stdin = [(a[:2], i) for (a, _), i in zip(cli.calls, cli.inputs, strict=True) if i]
+    assert stdin == [(["secrets", "put-secret"], KEY)]
+
+
+def test_deploy_refuses_without_the_cli(monkeypatch, tmp_path) -> None:
+    def missing(*a, **k):
+        raise FileNotFoundError("databricks")
+
+    monkeypatch.setattr(databricks.subprocess, "run", missing)
+    with pytest.raises(databricks.DatabricksError, match="not installed"):
+        databricks.deploy(_options(tmp_path), run=REAL_RUN_CLI)
+    assert not (tmp_path / "bundle").exists()
+
+
+def test_deploy_refuses_an_old_cli(tmp_path) -> None:
+    cli = FakeCli({"--version": "Databricks CLI v0.260.0\n"})
+    with pytest.raises(databricks.DatabricksError, match="too old"):
+        databricks.deploy(_options(tmp_path), run=cli)
+    assert cli.commands() == ["--version"]
+
+
+def test_deploy_refuses_without_a_key_file(tmp_path) -> None:
+    cli = FakeCli()
+    options = _options(tmp_path, key_file=tmp_path / "missing")
+    with pytest.raises(databricks.DatabricksError, match="easy-or-not setup"):
+        databricks.deploy(options, run=cli)
+    assert cli.commands() == ["--version"]  # nothing touched the workspace
+
+
+def test_deploy_refuses_an_empty_key_file(tmp_path) -> None:
+    options = _options(tmp_path)
+    options.key_file.write_text("\n")
+    with pytest.raises(databricks.DatabricksError, match="easy-or-not setup"):
+        databricks.deploy(options, run=FakeCli())
+
+
+def test_deploy_refuses_an_unknown_timezone(tmp_path) -> None:
+    with pytest.raises(databricks.DatabricksError, match="timezone"):
+        databricks.deploy(_options(tmp_path, timezone="Mars/Olympus"), run=FakeCli())
+
+
+def test_deploy_creates_a_missing_schema(tmp_path) -> None:
+    cli = FakeCli(fail={"schemas get": "SCHEMA_DOES_NOT_EXIST"})
+    lines: list[str] = []
+    databricks.deploy(_options(tmp_path), run=cli, out=lines.append)
+    assert ["schemas", "create", "running", "main"] in [a for a, _ in cli.calls]
+    assert any("Created schema main.running" in line for line in lines)
+
+
+def test_deploy_ignores_an_existing_scope(tmp_path) -> None:
+    cli = FakeCli(fail={"secrets create-scope": "Scope easy-or-not already exists"})
+    databricks.deploy(_options(tmp_path), run=cli)
+    assert "secrets put-secret" in cli.commands()
+
+
+def test_deploy_stops_on_other_scope_errors(tmp_path) -> None:
+    cli = FakeCli(fail={"secrets create-scope": "PERMISSION_DENIED"})
+    with pytest.raises(databricks.DatabricksError, match="PERMISSION_DENIED"):
+        databricks.deploy(_options(tmp_path), run=cli)
+    assert "secrets put-secret" not in cli.commands()
+
+
+def test_deploy_picks_the_named_warehouse(tmp_path) -> None:
+    cli = FakeCli()
+    databricks.deploy(_options(tmp_path, warehouse="Classic"), run=cli)
+    assert "warehouse_id: classic1" in (tmp_path / "bundle/resources/genie.yml").read_text()
+
+
+def test_deploy_without_any_warehouse(tmp_path) -> None:
+    cli = FakeCli({"warehouses list": "[]"})
+    with pytest.raises(databricks.DatabricksError, match="No SQL warehouse"):
+        databricks.deploy(_options(tmp_path), run=cli)
+
+
+def test_deploy_with_a_wrong_warehouse_name(tmp_path) -> None:
+    with pytest.raises(databricks.DatabricksError, match="Nope"):
+        databricks.deploy(_options(tmp_path, warehouse="Nope"), run=FakeCli())
+
+
+def test_deploy_without_a_genie_url_still_finishes(tmp_path) -> None:
+    cli = FakeCli({"bundle summary": json.dumps({"resources": {}})})
+    lines: list[str] = []
+    assert databricks.deploy(_options(tmp_path), run=cli, out=lines.append) == ""
+    assert any("bundle summary" in line for line in lines)
+
+
+def test_run_cli_error_carries_stderr_not_stdin(monkeypatch) -> None:
+    def failing(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom from the server")
+
+    monkeypatch.setattr(databricks.subprocess, "run", failing)
+    with pytest.raises(databricks.DatabricksError) as e:
+        REAL_RUN_CLI(["secrets", "put-secret", "s", "k"], input=KEY)
+    assert "boom from the server" in str(e.value)
+    assert KEY not in str(e.value)
+
+
+def test_local_timezone_prefers_tz() -> None:
+    assert databricks.local_timezone({"TZ": "Europe/London"}) == "Europe/London"
+    # An unknown TZ falls through to the machine's zone, or UTC.
+    assert databricks._valid_timezone(databricks.local_timezone({"TZ": "Not/AZone"}))
+
+
+def test_destroy(tmp_path) -> None:
+    (tmp_path / "databricks.yml").write_text("bundle: {name: x}")
+    cli = FakeCli()
+    lines: list[str] = []
+    databricks.destroy(target="prod", bundle_dir=tmp_path, run=cli, out=lines.append)
+    assert cli.commands() == ["--version", "bundle destroy", "secrets delete-scope"]
+    destroy_args = cli.calls[1][0]
+    assert "--auto-approve" in destroy_args
+    assert destroy_args[destroy_args.index("-t") + 1] == "prod"
+    assert any("left in place" in line for line in lines)
+
+
+def test_destroy_without_a_bundle(tmp_path) -> None:
+    with pytest.raises(databricks.DatabricksError, match="nothing to destroy"):
+        databricks.destroy(bundle_dir=tmp_path, run=FakeCli())
+
+
+def test_destroy_ignores_a_missing_scope(tmp_path) -> None:
+    (tmp_path / "databricks.yml").write_text("bundle: {name: x}")
+    cli = FakeCli(fail={"secrets delete-scope": "RESOURCE_DOES_NOT_EXIST: scope does not exist"})
+    databricks.destroy(bundle_dir=tmp_path, run=cli)
+
+
+# CLI wiring
+
+
+def test_cli_deploy_reports_a_missing_cli(monkeypatch, capsys) -> None:
+    from easy_or_not.cli import main
+
+    def missing(*a, **k):
+        raise databricks.DatabricksError("The Databricks CLI is not installed. Install it from x")
+
+    monkeypatch.setattr(databricks, "run_cli", missing)
+    assert main(["databricks", "deploy", "--catalog", "main", "--schema", "running"]) == 2
+    assert "not installed" in capsys.readouterr().err
+
+
+def test_cli_deploy_reports_a_missing_key(monkeypatch, tmp_path, capsys) -> None:
+    from easy_or_not.cli import main
+
+    monkeypatch.setattr(databricks, "run_cli", FakeCli())
+    monkeypatch.setattr(databricks, "DEFAULT_KEY_FILE", tmp_path / "missing")
+    monkeypatch.setattr(databricks, "DEFAULT_BUNDLE_DIR", tmp_path / "bundle")
+    assert main(["databricks", "deploy", "--catalog", "main", "--schema", "running"]) == 2
+    assert "easy-or-not setup" in capsys.readouterr().err
+    assert not (tmp_path / "bundle").exists()
+
+
+def test_cli_destroy_reports_errors(monkeypatch, tmp_path, capsys) -> None:
+    from easy_or_not.cli import main
+
+    monkeypatch.setattr(databricks, "run_cli", FakeCli())
+    monkeypatch.setattr(databricks, "DEFAULT_BUNDLE_DIR", tmp_path)
+    assert main(["databricks", "destroy"]) == 2
+    assert "nothing to destroy" in capsys.readouterr().err
+
+
+def test_cli_databricks_needs_an_action() -> None:
+    from easy_or_not.cli import main
+
+    with pytest.raises(SystemExit):
+        main(["databricks"])
+
+
+def test_a_test_that_forgets_to_fake_the_cli_fails_loudly(tmp_path) -> None:
+    with pytest.raises(AssertionError, match="fake run_cli"):
+        databricks.deploy(_options(tmp_path))

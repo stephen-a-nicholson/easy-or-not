@@ -46,9 +46,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--json", action="store_true", help="print JSON instead of text")
     p.set_defaults(days=56, cache_dir=DEFAULT_CACHE)  # for a bare `easy-or-not`
-    sub = p.add_subparsers(dest="source", metavar="{garmin,readiness,files,setup}")
+    sub = p.add_subparsers(dest="source", metavar="{garmin,readiness,files,setup,databricks}")
 
     sub.add_parser("setup", help="save your Garmin Personal API key (run this once)")
+
+    databricks = sub.add_parser(
+        "databricks", help="run this daily on Databricks and ask Genie about the results"
+    )
+    actions = databricks.add_subparsers(dest="action", required=True, metavar="{deploy,destroy}")
+    deploy = actions.add_parser("deploy", help="create or update the job, tables and Genie space")
+    deploy.add_argument("--catalog", required=True, help="Unity Catalog catalog for the tables")
+    deploy.add_argument("--schema", required=True, help="schema for the tables, created if missing")
+    deploy.add_argument("--warehouse", help="SQL warehouse for Genie (default: first serverless)")
+    deploy.add_argument("--timezone", help="IANA zone for the 06:30 schedule (default: local)")
+    destroy = actions.add_parser("destroy", help="remove the job, volume, Genie space and secret")
+    for action in (deploy, destroy):
+        action.add_argument("--profile", help="~/.databrickscfg profile (default: DEFAULT)")
+        action.add_argument("--target", default="dev", help="bundle target (default dev)")
 
     files = sub.add_parser("files", help="analyse .fit or .zip files you have exported")
     files.add_argument("paths", nargs="+", type=Path)
@@ -92,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
         from easy_or_not.setup import setup
 
         return setup()
+    if args.source == "databricks":
+        return _databricks(args)
     if args.source == "files":
         for path in args.paths:
             try:
@@ -153,6 +169,30 @@ def _readiness(
     else:
         style = terminal_style(sys.stdout, os.environ)
         print(render_readiness(readiness, wellness, style))
+    return 0
+
+
+def _databricks(args: argparse.Namespace) -> int:
+    # Imported here so the base install never loads it.
+    from easy_or_not import databricks
+
+    try:
+        if args.action == "deploy":
+            databricks.deploy(
+                databricks.DeployOptions(
+                    catalog=args.catalog,
+                    schema=args.schema,
+                    profile=args.profile,
+                    target=args.target,
+                    warehouse=args.warehouse,
+                    timezone=args.timezone,
+                )
+            )
+        else:
+            databricks.destroy(profile=args.profile, target=args.target)
+    except (databricks.DatabricksError, ValueError) as e:
+        print(str(e), file=sys.stderr)
+        return 2
     return 0
 
 
