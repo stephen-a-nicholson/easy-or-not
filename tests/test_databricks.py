@@ -446,6 +446,18 @@ def test_deploy_with_a_local_wheel(tmp_path) -> None:
     assert any("job installs ../wheels/" in line for line in lines)
 
 
+def test_deploy_without_a_wheel_clears_an_old_one(tmp_path) -> None:
+    old = tmp_path / "bundle" / "wheels" / "easy_or_not-0.2.0-py3-none-any.whl"
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b"PK")
+    databricks.deploy(_options(tmp_path), run=FakeCli())
+    assert not old.parent.exists()
+    assert (
+        f"easy-or-not=={databricks.__version__}"
+        in (tmp_path / "bundle" / "resources" / "job.yml").read_text()
+    )
+
+
 def test_deploy_refuses_a_missing_wheel(tmp_path) -> None:
     cli = FakeCli()
     with pytest.raises(databricks.DatabricksError, match="uv build"):

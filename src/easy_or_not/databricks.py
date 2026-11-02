@@ -520,8 +520,10 @@ def deploy(
         },
         bundle_dir,
     )
+    # Only the wheel being installed is synced; one left from an earlier deploy is not.
+    shutil.rmtree(bundle_dir / WHEEL_DIR, ignore_errors=True)
     if options.wheel:
-        (bundle_dir / WHEEL_DIR).mkdir(exist_ok=True)
+        (bundle_dir / WHEEL_DIR).mkdir()
         shutil.copy(options.wheel, bundle_dir / WHEEL_DIR / options.wheel.name)
     out(f"Bundle written to {bundle_dir}, job installs {package}")
     put_secret(cli, key)
