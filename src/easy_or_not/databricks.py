@@ -12,6 +12,7 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import zoneinfo
 from collections.abc import Callable, Iterator, Mapping
@@ -33,16 +34,18 @@ CLI_INSTALL = "https://docs.databricks.com/dev-tools/cli/install.html"
 DEFAULT_BUNDLE_DIR = Path("~/.config/easy-or-not/databricks").expanduser()
 DEFAULT_KEY_FILE = Path("~/.config/garmin/connect-personal-api-key").expanduser()
 JOB_KEY = "daily"
+VOLUME_KEY = "cache"
 GENIE_KEY = "easy_or_not"
 
 BUNDLE_PACKAGE = "databricks_bundle"
-PLACEHOLDERS = ("catalog", "schema", "user", "version", "warehouse_id", "timezone")
+PLACEHOLDERS = ("catalog", "schema", "user", "package", "warehouse_id", "timezone")
 PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
+WHEEL_DIR = "wheels"
 
 # Catalog and schema go into SQL, volume paths and Genie table names unquoted,
 # so keep them to plain identifiers. Other values go into YAML and paths.
 IDENTIFIER = re.compile(r"[A-Za-z0-9_]+")
-SAFE_VALUE = re.compile(r"[\w.@/+:-]+")
+SAFE_VALUE = re.compile(r"[\w.@/+:=-]+")
 
 
 def _check_identifier(kind: str, value: str) -> None:
@@ -349,7 +352,10 @@ class Cli:
         self._run, self.profile, self.bundle_dir = run, profile, bundle_dir
 
     def __call__(self, *args: str, input: str | None = None) -> str:
-        argv = list(args) + (["-p", self.profile] if self.profile else [])
+        # --version takes no profile; every real command does.
+        argv = list(args)
+        if self.profile and not args[0].startswith("-"):
+            argv += ["-p", self.profile]
         # bundle commands only work from inside the bundle directory.
         cwd = self.bundle_dir if args[0] == "bundle" else None
         return self._run(argv, input=input, cwd=cwd)
@@ -474,6 +480,7 @@ class DeployOptions:
     target: str = "dev"
     warehouse: str | None = None
     timezone: str | None = None
+    wheel: Path | None = None  # install this instead of the PyPI release
     bundle_dir: Path | None = None  # DEFAULT_BUNDLE_DIR
     key_file: Path | None = None  # DEFAULT_KEY_FILE
 
@@ -490,6 +497,12 @@ def deploy(
     timezone = options.timezone or local_timezone()
     if not _valid_timezone(timezone):
         raise DatabricksError(f"Unknown timezone {timezone!r}; use an IANA name like Europe/London")
+    package = f"easy-or-not=={__version__}"
+    if options.wheel:
+        if options.wheel.suffix != ".whl" or not options.wheel.is_file():
+            raise DatabricksError(f"{options.wheel} is not a wheel file; build one with: uv build")
+        # The bundle syncs it and rewrites the path, which is relative to resources/job.yml.
+        package = f"../{WHEEL_DIR}/{options.wheel.name}"
 
     user = current_user(cli)
     out(f"Deploying as {user} to target {options.target}")
@@ -501,18 +514,25 @@ def deploy(
             "catalog": options.catalog,
             "schema": options.schema,
             "user": user,
-            "version": __version__,
+            "package": package,
             "warehouse_id": warehouse_id,
             "timezone": timezone,
         },
         bundle_dir,
     )
-    out(f"Bundle written to {bundle_dir}")
+    if options.wheel:
+        (bundle_dir / WHEEL_DIR).mkdir(exist_ok=True)
+        shutil.copy(options.wheel, bundle_dir / WHEEL_DIR / options.wheel.name)
+    out(f"Bundle written to {bundle_dir}, job installs {package}")
     put_secret(cli, key)
     out(f"Garmin key stored in secret scope {SECRET_SCOPE}")
-    cli("bundle", "deploy", "--auto-approve", "-t", options.target)
-    out("Bundle deployed; running the job once (this fetches your runs from Garmin)")
+    # Genie refuses a space over tables that do not exist yet, and the job is
+    # what creates them, so the job and volume go first and the space after.
+    select = f"jobs.{JOB_KEY},volumes.{VOLUME_KEY}"
+    cli("bundle", "deploy", "--auto-approve", "--select", select, "-t", options.target)
+    out("Job deployed; running it once (this fetches your runs from Garmin)")
     cli("bundle", "run", JOB_KEY, "-t", options.target)
+    cli("bundle", "deploy", "--auto-approve", "-t", options.target)
     summary = cli.json("bundle", "summary", "-t", options.target)
     url = genie_url(summary)
     out(f"Tables are in {options.catalog}.{options.schema}: runs, days, weeks")

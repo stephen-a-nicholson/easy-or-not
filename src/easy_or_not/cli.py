@@ -59,6 +59,9 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("--schema", required=True, help="schema for the tables, created if missing")
     deploy.add_argument("--warehouse", help="SQL warehouse for Genie (default: first serverless)")
     deploy.add_argument("--timezone", help="IANA zone for the 06:30 schedule (default: local)")
+    deploy.add_argument(
+        "--wheel", type=Path, help="install this wheel on the job instead of the PyPI release"
+    )
     destroy = actions.add_parser("destroy", help="remove the job, volume, Genie space and secret")
     for action in (deploy, destroy):
         action.add_argument("--profile", help="~/.databrickscfg profile (default: DEFAULT)")
@@ -186,6 +189,7 @@ def _databricks(args: argparse.Namespace) -> int:
                     target=args.target,
                     warehouse=args.warehouse,
                     timezone=args.timezone,
+                    wheel=args.wheel,
                 )
             )
         else:

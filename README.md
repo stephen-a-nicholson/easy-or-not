@@ -68,6 +68,30 @@ easy-or-not --max-hr 192 files ~/Downloads/runs/
 
 Without the API there are no Garmin zones to read, so pass your max heart rate.
 
+## Run it daily on Databricks and ask Genie
+
+If you have a Databricks workspace, one command schedules the tool to run there every morning, lands the results in three Delta tables and creates a Genie space, so you can ask things like "which weeks did I train too hard?" in plain English.
+
+```bash
+easy-or-not setup                                   # if you have not saved your key yet
+easy-or-not databricks deploy --catalog main --schema running
+easy-or-not databricks destroy                      # removes it all again
+```
+
+You need the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/install.html) (1.3.0 or newer) installed and logged in; pass `--profile` to pick one of your profiles. `deploy` creates, in your workspace:
+
+- a serverless job, **easy-or-not daily**, that runs at 06:30 in your local timezone (pass `--timezone` to change it) and installs this package from PyPI (or a wheel you built, with `--wheel dist/easy_or_not-*.whl`, for trying an unreleased version);
+- the tables `runs`, `days` and `weeks` in the catalog and schema you name (the schema is created if it does not exist), replaced in full on every run;
+- a volume for the cached activity files, so each run only downloads new ones;
+- a secret scope `easy-or-not` holding your Garmin key, sent to Databricks on stdin and never written anywhere else;
+- a Genie space over the three tables, with instructions explaining the bands, load and readiness. It uses your first serverless SQL warehouse unless you pass `--warehouse`.
+
+The bundle it deploys is written to `~/.config/easy-or-not/databricks/` if you want to see or change it. The default target is `dev`, where Databricks pauses the schedule and prefixes resource names; use `--target prod` for the real thing.
+
+**Cost.** None of this is free. The job uses a few minutes of serverless compute a day, and each Genie question runs a query on your SQL warehouse. On a personal account that is pennies, but check your own rates. `destroy` removes the job, volume, Genie space and secret, and leaves the tables for you to drop.
+
+The tables are built from the same output as `easy-or-not --json garmin`, which from 0.3.0 includes seconds in each heart-rate zone per run. Column by column detail and example questions are in [docs/databricks.md](docs/databricks.md).
+
 ## What it measures
 
 **Bands.** Easy, middle and hard come from your heart-rate zones. By default easy is zones 1 and 2, middle is zone 3, hard is zones 4 and 5. Garmin's default zones start zone 3 at 70% of max HR, which is stricter than the roughly 80% easy ceiling used in polarised-training research. If you are on Garmin's defaults and everything looks "middle", try `--easy-up-to 3`. With `--max-hr`, the bands are below 80%, 80 to 90%, and above 90% of max.

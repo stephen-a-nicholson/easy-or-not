@@ -33,4 +33,4 @@ resources:
             # Version 4 runs Python 3.12, the oldest easy-or-not supports.
             environment_version: "4"
             dependencies:
-              - easy-or-not=={{version}}
+              - {{package}}

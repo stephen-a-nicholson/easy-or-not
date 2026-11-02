@@ -17,9 +17,30 @@ Code: `src/easy_or_not/` (`fit.py` parsing, `zones.py` bands, `checks.py` data s
 - Readiness (`easy-or-not readiness`, and a section at the end of the Garmin report): overnight HRV against Garmin's balanced range, resting HR against a 28-day median, Garmin sleep score, and the load ratio. Verified against the live API on 22 Oct 2026: HRV summaries (90 days fine), sleep summaries (HTTP 400 above about 31 days, so fetched in 28-day chunks), daily summaries `heartRate.restingValue`. Nights without the watch come back as nulls. The owner's sleep scores are often under 60, so sleep is the signal that most often says go easy.
 - Added training load (`load.py`): Edwards TRIMP per run, last 7 days against the 28-day weekly average, weekly history. Measured to today for the Garmin source. On the owner's data the ratio is 0.91.
 
-## Next work: Databricks and Genie (planned 2 Nov 2026)
+## Databricks and Genie (built 2 Nov 2026, not yet run live)
 
 Goal: one command deploys a Databricks Declarative Automation Bundle that runs the tool on a schedule, lands the results in Delta, and creates a Genie space so the owner can ask questions like "which weeks did I train too hard?" in plain English. The local tool stays exactly as it is for everyone else.
+
+**State on 2 Nov 2026:** all four steps done except publishing. Deployed for real to the owner's workspace (profile `agent-factory-dev`, catalog `workspace`, schema `running`, target `dev`, with `--wheel` since 0.3.0 is not on PyPI): 30 runs, 35 days and 9 weeks landed with every column comment, and the Genie space answered "which weeks did I train too hard?" with sensible SQL. Live findings, all fixed in code:
+
+- `databricks --version` takes no `-p`; `Cli` skips the profile for bare flags.
+- Relative paths in `resources/job.yml` resolve from `resources/`, so a local wheel is `../wheels/<name>`.
+- Genie refuses a space over tables that do not exist (403 at `POST /genie/spaces`), and the job creates them, so `deploy` is two-phase: `bundle deploy --select jobs.daily,volumes.cache`, `bundle run daily`, then a full `bundle deploy`.
+- Confirmed as written: `secrets put-secret` reads stdin, `dbutils.secrets.get` works in a serverless `spark_python_task`, serverless environment version 4 exists, the `.geniespace.json` layout was accepted, `${resources.volumes.cache.name}` resolves in the volume path, and `bundle summary -o json` has `resources.genie_spaces.<key>.url`.
+- `databricks genie ask` is a general agent, not a space. To test the space from a script use `genie start-conversation`, poll `get-message`, then `get-message-attachment-query-result`.
+- On the owner's data Genie says every week was too hard, because of the zone problem in "Current state": there is no `--max-hr` on the job yet. Worth adding as a deploy option.
+
+What was built differs from the plan below in these ways:
+
+- No `[databricks]` extra and no `databricks-sdk` dependency: `databricks.py` only shells out to the Databricks CLI, and `land.py` runs on the job where `databricks.sdk.runtime` already exists.
+- The job reads the key with `dbutils.secrets.get` in `land.py`; the `{{secrets/...}}` syntax is for classic cluster environment variables, not serverless.
+- Two template values the plan did not have: `warehouse_id` (Genie needs one; `--warehouse`, else the first serverless) and `timezone` (`--timezone`, else the machine's).
+- The schema is created by `deploy` if missing rather than being a bundle resource, so `destroy` does not drop the tables.
+- `--json` output gained `zone_seconds` per run (the one change to local output), so the `runs` table can carry zones 1 to 5.
+- Column names in the generated SQL are backticked; comments are SQL string literals and must not contain a quote mark.
+- `deploy`/`destroy` resolve `run_cli`, `DEFAULT_KEY_FILE` and `DEFAULT_BUNDLE_DIR` at call time, and an autouse fixture in `conftest.py` replaces all three. Keep it that way: the first test run reached the real CLI before that fixture existed.
+- The `.geniespace.json` layout (`version`, `data_sources.tables`, `instructions.text_instructions`, `config.sample_questions` with sorted 32-hex ids) was written from memory because the CLI schema leaves `serialized_space` untyped. Expect this to be the first thing the live deploy disagrees with, along with the `${resources.volumes.cache.name}` reference in the volume path, `put-secret` reading stdin, and the shape of `bundle summary -o json`.
+- The `genie_spaces` resource fields in CLI 1.16.0: `title`, `description`, `warehouse_id`, `parent_path`, `file_path` or `serialized_space`, `etag`, `lifecycle`, `permissions` (unused).
 
 ### User experience
 
@@ -46,10 +67,10 @@ easy-or-not databricks destroy
 
 ### Order of work
 
-1. Templates and `land`, with tests, before any CLI wiring.
-2. `deploy`/`destroy` with the CLI checks and secret handling.
-3. Run it for real from the owner's laptop against their workspace. Fix whatever the live API disagrees with (expect the Genie resource shape to need adjusting).
-4. README, docs, version bump, publish.
+1. Done. Templates and `land`, with tests, before any CLI wiring.
+2. Done. `deploy`/`destroy` with the CLI checks and secret handling.
+3. Done (2 Nov 2026), see the live findings above. On WSL, `databricks auth login` mangles the OAuth URL when it opens the Windows browser (the `&`s are lost); open the printed URL with `powershell.exe -Command "Start-Process '<url>'"` instead.
+4. Done except publishing. README section, `docs/databricks.md`, 0.3.0 bump. **Next:** publish with `gh workflow run publish.yml`, then redeploy without `--wheel` to prove the PyPI path.
 
 ### Still open from before
 

@@ -27,7 +27,7 @@ VALUES = {
     "catalog": "main",
     "schema": "running",
     "user": "runner@example.com",
-    "version": "0.3.0",
+    "package": "easy-or-not==0.3.0",
     "warehouse_id": "abc123",
     "timezone": "Europe/London",
 }
@@ -407,19 +407,23 @@ def test_deploy_end_to_end(tmp_path) -> None:
         "schemas get",
         "secrets create-scope",
         "secrets put-secret",
-        "bundle deploy",
+        "bundle deploy",  # job and volume only: the Genie space needs the tables to exist
         "bundle run",
+        "bundle deploy",  # everything, now the job has made the tables
         "bundle summary",
     ]
     assert url == "https://x/genie/1"
     assert any("https://x/genie/1" in line for line in lines)
+    first, second = (a for a, _ in cli.calls if a[:2] == ["bundle", "deploy"])
+    assert first[first.index("--select") + 1] == "jobs.daily,volumes.cache"
+    assert "--select" not in second
 
-    # Every call carries the profile; bundle commands run inside the bundle directory.
+    # Every command carries the profile (--version cannot take one); bundle
+    # commands run inside the bundle directory.
     for args, cwd in cli.calls:
-        assert args[-2:] == ["-p", "work"]
+        assert (args[-2:] == ["-p", "work"]) == (args[0] != "--version")
         assert (cwd == tmp_path / "bundle") == (args[0] == "bundle")
-    deploy_args = next(a for a, _ in cli.calls if a[:2] == ["bundle", "deploy"])
-    assert "-t" in deploy_args and deploy_args[deploy_args.index("-t") + 1] == "dev"
+    assert first[first.index("-t") + 1] == "dev"
 
     # The bundle got the live values: the first serverless warehouse, the user, the version.
     job = (tmp_path / "bundle" / "resources" / "job.yml").read_text()
@@ -428,6 +432,25 @@ def test_deploy_end_to_end(tmp_path) -> None:
     assert "Europe/London" in job
     assert "warehouse_id: sls1" in genie
     assert "runner@example.com" in genie
+
+
+def test_deploy_with_a_local_wheel(tmp_path) -> None:
+    wheel = tmp_path / "easy_or_not-0.3.0-py3-none-any.whl"
+    wheel.write_bytes(b"PK")
+    lines: list[str] = []
+    databricks.deploy(_options(tmp_path, wheel=wheel), run=FakeCli(), out=lines.append)
+    job = (tmp_path / "bundle" / "resources" / "job.yml").read_text()
+    assert "- ../wheels/easy_or_not-0.3.0-py3-none-any.whl" in job  # relative to job.yml
+    assert "easy-or-not==" not in job
+    assert (tmp_path / "bundle" / "wheels" / wheel.name).read_bytes() == b"PK"
+    assert any("job installs ../wheels/" in line for line in lines)
+
+
+def test_deploy_refuses_a_missing_wheel(tmp_path) -> None:
+    cli = FakeCli()
+    with pytest.raises(databricks.DatabricksError, match="uv build"):
+        databricks.deploy(_options(tmp_path, wheel=tmp_path / "nope.whl"), run=cli)
+    assert cli.commands() == ["--version"]
 
 
 def test_deploy_only_passes_the_key_on_stdin(tmp_path) -> None:
